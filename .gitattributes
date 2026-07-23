@@ -1,0 +1,5 @@
+# Keep shell scripts and container files LF so they run on mac/linux and in
+# the Linux container regardless of the committer's platform.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.ps1 text eol=crlf

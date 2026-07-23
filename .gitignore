@@ -1,4 +1,6 @@
 # --- Python / FastAPI ---
+# Ephemeral SQLite database (recreated on every startup)
+*.db
 __pycache__/
 *.py[cod]
 *$py.class

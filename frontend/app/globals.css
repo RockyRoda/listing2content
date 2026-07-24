@@ -1,0 +1,348 @@
+/*
+ * Coastal Dusk - the visual system for Listing2Content.
+ * The world of resort listings is golden-hour light meeting the sea, so the
+ * canvas is a dusk sky and the signature is a horizon line: a thin brass rule
+ * with a small sun set at the golden ratio. It recurs as the wordmark divider,
+ * the focused-field underline, and the ambient backdrop.
+ */
+
+:root {
+  --ink: #0b1622; /* deepest sky */
+  --ink-2: #0e1c2b; /* canvas */
+  --panel: rgba(18, 34, 52, 0.55); /* glass over the horizon */
+  --sea: #16303b; /* the golden-hour sea band */
+  --brass: #c9a15a; /* the sun */
+  --brass-bright: #e2bd78;
+  --sand: #f3ede3; /* primary text on dusk */
+  --mist: #9fb0bc; /* secondary text */
+  --line: rgba(159, 176, 188, 0.28);
+  --danger: #e08a6b;
+  --radius: 14px;
+  --sun-x: 61.8%; /* golden ratio */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--ink-2);
+  color: var(--sand);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Ambient dusk: sky to golden sea to sky, with a low sun glow. */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(
+      120% 90% at var(--sun-x) 68%,
+      rgba(201, 161, 90, 0.22),
+      transparent 55%
+    ),
+    linear-gradient(
+      180deg,
+      #0a131d 0%,
+      var(--ink-2) 38%,
+      var(--sea) 62%,
+      var(--ink-2) 80%,
+      #0a131d 100%
+    );
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
+  margin: 0;
+}
+
+a {
+  color: var(--brass-bright);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* --- Signature: the horizon line --- */
+.horizon {
+  position: relative;
+  height: 1px;
+  border: 0;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--brass) 18%,
+    var(--brass) 82%,
+    transparent
+  );
+}
+.horizon::after {
+  content: "";
+  position: absolute;
+  left: var(--sun-x);
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brass-bright);
+  box-shadow: 0 0 14px 2px rgba(201, 161, 90, 0.75);
+  transform: translate(-50%, -50%);
+}
+
+/* --- Wordmark --- */
+.wordmark {
+  font-family: var(--font-body), sans-serif;
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--sand);
+}
+.wordmark .two {
+  color: var(--brass);
+}
+
+.eyebrow {
+  font-size: 0.72rem;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--mist);
+}
+
+/* --- Auth layout --- */
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.25rem;
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(201, 161, 90, 0.18);
+  border-radius: var(--radius);
+  padding: 2.5rem 2.25rem 2.25rem;
+  box-shadow: 0 40px 90px -50px rgba(0, 0, 0, 0.9);
+}
+
+.card__head {
+  text-align: center;
+  margin-bottom: 1.75rem;
+}
+.card__head .horizon {
+  margin: 1.1rem auto 1.25rem;
+  max-width: 180px;
+}
+.card h1 {
+  font-size: 2rem;
+  margin-bottom: 0.4rem;
+}
+.card__sub {
+  color: var(--mist);
+  font-size: 0.94rem;
+  margin: 0;
+}
+
+/* --- Fields --- */
+.field {
+  margin-bottom: 1.35rem;
+}
+.field label {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mist);
+  margin-bottom: 0.5rem;
+}
+.field input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--sand);
+  font: inherit;
+  padding: 0.5rem 0;
+  transition: border-color 0.2s ease;
+}
+.field input::placeholder {
+  color: rgba(159, 176, 188, 0.4);
+}
+.field input:focus {
+  outline: none;
+  border-bottom-color: var(--brass);
+}
+
+/* --- Buttons --- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  background: var(--brass);
+  color: #201705;
+  transition:
+    background 0.2s ease,
+    transform 0.05s ease;
+}
+.btn:hover {
+  background: var(--brass-bright);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn--ghost {
+  width: auto;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--sand);
+  padding: 0.5rem 1rem;
+}
+.btn--ghost:hover {
+  background: rgba(159, 176, 188, 0.08);
+  border-color: var(--mist);
+}
+
+/* --- Utility --- */
+.form-error {
+  color: var(--danger);
+  font-size: 0.86rem;
+  margin: 0 0 1rem;
+  min-height: 1.2em;
+}
+.card__foot {
+  text-align: center;
+  margin-top: 1.6rem;
+  font-size: 0.9rem;
+  color: var(--mist);
+}
+
+.center-note {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--mist);
+}
+
+/* --- Dashboard --- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem clamp(1.25rem, 5vw, 3.5rem);
+}
+.topbar__divider {
+  padding: 0 clamp(1.25rem, 5vw, 3.5rem);
+}
+
+.dash {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: clamp(2.5rem, 7vw, 5rem) clamp(1.25rem, 5vw, 3.5rem) 4rem;
+}
+.dash__hero {
+  margin-bottom: 3rem;
+}
+.dash__hero .eyebrow {
+  margin-bottom: 0.9rem;
+}
+.dash__hero h1 {
+  font-size: clamp(2.4rem, 6vw, 3.6rem);
+  max-width: 15ch;
+}
+.dash__hero h1 em {
+  font-style: italic;
+  color: var(--brass-bright);
+}
+.dash__hero p {
+  color: var(--mist);
+  max-width: 46ch;
+  margin: 1rem 0 0;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+.tile {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.6rem 1.5rem 1.75rem;
+  background: rgba(14, 28, 43, 0.4);
+  overflow: hidden;
+}
+.tile__index {
+  font-family: var(--font-display), serif;
+  font-size: 0.95rem;
+  color: var(--brass);
+  letter-spacing: 0.1em;
+}
+.tile h3 {
+  font-size: 1.3rem;
+  margin: 0.6rem 0 0.4rem;
+}
+.tile p {
+  color: var(--mist);
+  font-size: 0.92rem;
+  margin: 0 0 1.2rem;
+}
+.tile__tag {
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--brass);
+  border: 1px solid rgba(201, 161, 90, 0.35);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass-bright);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

@@ -60,7 +60,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
 
 ---
 
-## Phase 0 — Scaffolding
+## Phase 0 — Scaffolding [x]
 - Create `backend/` as a `uv` project (FastAPI, uvicorn added via `uv add`)
 - Create `frontend/` (framework TBD — see open questions)
 - Create `scripts/` with placeholder start/stop scripts for mac/linux/windows
@@ -73,7 +73,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   container builds and runs it; the spike call returns a parsed Pydantic
   object
 
-## Phase 1 — Auth & users
+## Phase 1 — Auth & users [x]
 - SQLite schema: `users` table (id, email, hashed password, created_at) and
   `sessions` table (token, user_id)
 - DB created fresh on each container startup (`db.py` init, per CLAUDE.md)
@@ -88,7 +88,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
 - Validate: create a user, log in, hit a protected endpoint with the token,
   confirm a bad/missing token 401s
 
-## Phase 2 — Frontend shell
+## Phase 2 — Frontend shell [x]
 - Scaffold Next.js app (`output: "export"`), wire the static export into
   FastAPI's static file serving
 - Sign up / sign in pages calling Phase 1 endpoints, storing `{user, token}`
@@ -97,7 +97,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   placeholder dashboard, refresh the page and confirm the session persists
   via `localStorage`
 
-## Phase 3 — Listing data model, ingestion & voice profile
+## Phase 3 — Listing data model, ingestion & voice profile [ ]
 - DB schema: `listings` (specs, features, MLS details, owner/user_id) and
   `listing_photos` (file refs)
 - DB schema: `voice_profiles` (user_id, tone/style fields, sample_text) —
@@ -117,7 +117,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   upload a voice-profile text file and confirm the extracted text persists;
   confirm an oversized/wrong-type photo upload is rejected
 
-## Phase 4 — AI content generation (core value, ship this early)
+## Phase 4 — AI content generation (core value, ship this early) [ ]
 - DB schema: `content_packages` (id, listing_id, status `draft`/`approved`,
   generated_at, reel_script text), `carousel_slides` (id,
   content_package_id, listing_photo_id, order_index, caption), `captions`
@@ -137,7 +137,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   structured, on-brand package out referencing the right photos, displayed
   in the UI
 
-## Phase 5 — Review / approve / edit pass
+## Phase 5 — Review / approve / edit pass [ ]
 - UI to review each piece of the package (carousel/captions/script),
   edit inline, and save
 - Endpoints to update `carousel_slides.caption` / `captions.text` /
@@ -146,14 +146,14 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
 - Validate: generate a package, edit a caption, save, reload and confirm
   the edit persisted
 
-## Phase 6 — AI chat (data entry + editing)
+## Phase 6 — AI chat (data entry + editing) [ ]
 - Chat endpoint that can (a) parse conversational input into listing fields
   and (b) apply conversational edit instructions to an existing package
 - Chat UI wired to that endpoint, scoped to a listing
 - Validate: use chat to fill in a listing field and to request an edit to a
   generated caption; confirm both persist
 
-## Phase 7 — Docker packaging & scripts
+## Phase 7 — Docker packaging & scripts [ ]
 - Finalize single-container Docker build (backend serving built frontend,
   SQLite inside container)
 - `OPENROUTER_API_KEY` reaches the container via `docker run --env-file
@@ -166,13 +166,13 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   `http://localhost:8000` with a fresh DB, and a generation call succeeds
   (proving the API key made it into the container)
 
-## Phase 8 — Testing & hardening
+## Phase 8 — Testing & hardening [ ]
 - Unit tests: auth, listing CRUD, structured-output parsing
 - Integration tests: signup -> listing -> generate -> edit -> save flow
 - Fix issues found; keep changes incremental per CLAUDE.md guidance
 - Validate: test suite green via `uv run pytest`
 
-## Phase 9 — Wrap-up
+## Phase 9 — Wrap-up [ ]
 - Update `README.md` (concise, per CLAUDE.md)
 - Final pass through `docs/PLAN.md` to mark completed phases
 - Open PR per the standard dev process in CLAUDE.md

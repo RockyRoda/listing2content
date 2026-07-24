@@ -12,6 +12,9 @@ from pathlib import Path
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "listing2content.db"
 
 SCHEMA = """
+DROP TABLE IF EXISTS listing_photos;
+DROP TABLE IF EXISTS listings;
+DROP TABLE IF EXISTS voice_profiles;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS users;
 
@@ -25,6 +28,40 @@ CREATE TABLE users (
 CREATE TABLE sessions (
     token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id)
+);
+
+CREATE TABLE listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    location TEXT,
+    price INTEGER,
+    beds INTEGER,
+    baths REAL,
+    interior_sqft INTEGER,
+    lot_size TEXT,
+    property_type TEXT,
+    mls_number TEXT,
+    features TEXT,
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE listing_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER NOT NULL REFERENCES listings(id),
+    filename TEXT NOT NULL,
+    original_name TEXT,
+    content_type TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE voice_profiles (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    sample_text TEXT NOT NULL DEFAULT '',
+    tone_notes TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 

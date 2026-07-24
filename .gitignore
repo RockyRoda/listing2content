@@ -1,6 +1,8 @@
 # --- Python / FastAPI ---
 # Ephemeral SQLite database (recreated on every startup)
 *.db
+# Ephemeral uploaded listing photos (recreated at runtime)
+backend/media/
 __pycache__/
 *.py[cod]
 *$py.class

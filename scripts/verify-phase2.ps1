@@ -34,36 +34,36 @@ Check "GET /signin (no trailing slash) resolves (200)"  ($noslash.StatusCode -eq
 $email = "verify+$(Get-Random)@studio.com"
 $body  = @{ email = $email; password = "secret123" } | ConvertTo-Json
 
-$su = Invoke-RestMethod -Method Post -Uri "$base/auth/signup" -Body $body -ContentType "application/json"
+$su = Invoke-RestMethod -Method Post -Uri "$base/api/auth/signup" -Body $body -ContentType "application/json"
 Check "signup returns a user id and token" (($su.user.id -gt 0) -and ($su.token.Length -gt 20))
 
 # Duplicate signup -> 409
 $dupCode = 0
-try { Invoke-RestMethod -Method Post -Uri "$base/auth/signup" -Body $body -ContentType "application/json" } catch { $dupCode = $_.Exception.Response.StatusCode.value__ }
+try { Invoke-RestMethod -Method Post -Uri "$base/api/auth/signup" -Body $body -ContentType "application/json" } catch { $dupCode = $_.Exception.Response.StatusCode.value__ }
 Check "duplicate email signup -> 409" ($dupCode -eq 409)
 
 # Signin with correct creds -> token
-$si = Invoke-RestMethod -Method Post -Uri "$base/auth/signin" -Body $body -ContentType "application/json"
+$si = Invoke-RestMethod -Method Post -Uri "$base/api/auth/signin" -Body $body -ContentType "application/json"
 Check "signin with correct password returns token" ($si.token.Length -gt 20)
 
 # Wrong password -> 401
 $wrong = @{ email = $email; password = "nope" } | ConvertTo-Json
 $wpCode = 0
-try { Invoke-RestMethod -Method Post -Uri "$base/auth/signin" -Body $wrong -ContentType "application/json" } catch { $wpCode = $_.Exception.Response.StatusCode.value__ }
+try { Invoke-RestMethod -Method Post -Uri "$base/api/auth/signin" -Body $wrong -ContentType "application/json" } catch { $wpCode = $_.Exception.Response.StatusCode.value__ }
 Check "signin with wrong password -> 401" ($wpCode -eq 401)
 
 # Protected /auth/me with token -> the user
-$me = Invoke-RestMethod -Uri "$base/auth/me" -Headers @{ Authorization = "Bearer $($su.token)" }
+$me = Invoke-RestMethod -Uri "$base/api/auth/me" -Headers @{ Authorization = "Bearer $($su.token)" }
 Check "/auth/me with valid token returns the user" ($me.email -eq $email)
 
 # Protected /auth/me with bad token -> 401
 $badCode = 0
-try { Invoke-RestMethod -Uri "$base/auth/me" -Headers @{ Authorization = "Bearer garbage" } } catch { $badCode = $_.Exception.Response.StatusCode.value__ }
+try { Invoke-RestMethod -Uri "$base/api/auth/me" -Headers @{ Authorization = "Bearer garbage" } } catch { $badCode = $_.Exception.Response.StatusCode.value__ }
 Check "/auth/me with bad token -> 401" ($badCode -eq 401)
 
 # Protected /auth/me with no token -> 401
 $noCode = 0
-try { Invoke-RestMethod -Uri "$base/auth/me" } catch { $noCode = $_.Exception.Response.StatusCode.value__ }
+try { Invoke-RestMethod -Uri "$base/api/auth/me" } catch { $noCode = $_.Exception.Response.StatusCode.value__ }
 Check "/auth/me with no token -> 401" ($noCode -eq 401)
 
 Write-Host ""

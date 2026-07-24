@@ -7,8 +7,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import db
+from . import db, storage
 from .auth import router as auth_router
+from .listings import router as listings_router
+from .voice_profiles import router as voice_router
 
 # The built frontend (Next.js static export). Override with L2C_FRONTEND_DIR;
 # defaults to <repo>/frontend/out for local runs and /app/frontend/out in Docker.
@@ -22,13 +24,18 @@ FRONTEND_DIR = Path(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Recreate the database schema on startup."""
+    """Recreate the database schema and media directory on startup."""
     db.init_db()
+    storage.init_storage()
     yield
 
 
+# API routes live under /api so they never collide with the frontend's own
+# routes (the SPA owns paths like /listings and /settings at the root).
 app = FastAPI(title="Listing2Content", lifespan=lifespan)
-app.include_router(auth_router)
+app.include_router(auth_router, prefix="/api")
+app.include_router(listings_router, prefix="/api")
+app.include_router(voice_router, prefix="/api")
 
 
 @app.get("/health")

@@ -97,7 +97,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   placeholder dashboard, refresh the page and confirm the session persists
   via `localStorage`
 
-## Phase 3 — Listing data model, ingestion & voice profile [ ]
+## Phase 3 — Listing data model, ingestion & voice profile [x]
 - DB schema: `listings` (specs, features, MLS details, owner/user_id) and
   `listing_photos` (file refs)
 - DB schema: `voice_profiles` (user_id, tone/style fields, sample_text) —

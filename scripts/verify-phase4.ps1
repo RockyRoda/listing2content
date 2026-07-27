@@ -79,6 +79,9 @@ Check "slides carry a photo_url"                    (-not ($pkg.slides | Where-O
 Check "every slide caption has text"                (-not ($pkg.slides | Where-Object { $_.caption.Length -lt 10 }))
 Check "caption set has 3-5 labelled captions"       (($pkg.captions.Count -ge 3) -and ($pkg.captions.Count -le 5))
 Check "reel script is substantial"                  ($pkg.reel_script.Length -gt 200)
+# Sampled, not guaranteed: the model occasionally writes "from Photo 1" into a
+# shot direction. Measured at 0 leaks in 40 runs, so a failure here means the
+# behaviour came back, not that the check is broken.
 Check "copy does not leak photo numbering"          ($pkg.reel_script -notmatch "(?i)photo\s*\d")
 
 # The photos are only reachable with the bearer token.

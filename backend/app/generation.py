@@ -44,9 +44,17 @@ ASSEMBLY_PROMPT = (
     " 'Investment angle') and the caption text."
     "\n- reel_script: a 30-45 second Reel script with spoken lines and brief"
     " shot directions."
-    "\n\nThe photo numbering below is only for pairing slides to images. Never"
-    " mention photo numbers in any caption or script line -- the reader sees"
-    " the images, not the list."
+)
+
+# Kept next to the numbered photo list in the user message rather than in the
+# system prompt: the model reaches for "from Photo 1" in shot directions, and
+# the reminder holds better when it sits beside the numbering it is about.
+NUMBERING_REMINDER = (
+    "The numbering above exists only to fill in each slide's photo_number."
+    " That field is the one place a photo number belongs. Never write"
+    " 'Photo 1' or similar in a caption, a script line, or a shot direction --"
+    " describe what the image shows instead, as in 'the undulating blue"
+    " sculpture', never 'the sculpture from Photo 1'."
 )
 
 # Listing columns worth showing the model, with the labels used in the prompt.
@@ -146,6 +154,7 @@ def assemble_package(
     user_content = (
         f"LISTING\n{_listing_brief(listing)}"
         f"\n\nPHOTOS\n{photos or 'No photos were provided for this listing.'}"
+        f"\n\n{NUMBERING_REMINDER}"
         f"\n\nAGENT VOICE\n{_voice_brief(sample_text, tone_notes)}"
     )
     response = completion(

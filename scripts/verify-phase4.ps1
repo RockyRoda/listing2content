@@ -69,6 +69,7 @@ Write-Host "  ....  generating (real LLM calls, please wait)" -ForegroundColor D
 $sw  = [Diagnostics.Stopwatch]::StartNew()
 $pkg = Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($listing.id)/package" -Headers $H
 $sw.Stop()
+$twoPhotoSeconds = $sw.Elapsed.TotalSeconds
 
 Check "generate returns a draft package"            ($pkg.status -eq "draft")
 Check "generated in under 60s ($([int]$sw.Elapsed.TotalSeconds)s)" ($sw.Elapsed.TotalSeconds -lt 60)
@@ -121,6 +122,119 @@ Invoke-RestMethod -Method Delete -Uri "$base/api/listings/$($listing.id)/photos/
 $afterDelete = Invoke-RestMethod -Uri "$base/api/listings/$($listing.id)/package" -Headers $H
 Check "deleting a used photo clears the slide reference" (
   $null -eq ($afterDelete.slides | Where-Object { $_.listing_photo_id -eq $usedPhoto }))
+
+# --- Captioning is capped at 8 photos and runs concurrently ---
+# Pads out to 12 files by reusing the sample photos; the cap is about count.
+$capDir = Join-Path $env:TEMP "l2c-cap-$(Get-Random)"
+New-Item -ItemType Directory -Path $capDir | Out-Null
+$pool = @(Get-ChildItem -Path (Split-Path $PhotoDir -Parent) -Recurse -Filter *.jpg)
+if ($pool.Count -eq 0) { $pool = $photos }
+for ($i = 0; $i -lt 12; $i++) {
+  Copy-Item $pool[$i % $pool.Count].FullName (Join-Path $capDir "shot$i.jpg")
+}
+
+$capListing = New-Listing "Twelve photo estate"
+$capArgs = @("-s", "-X", "POST", "$base/api/listings/$($capListing.id)/photos",
+             "-H", "Authorization: Bearer $($auth.token)")
+foreach ($f in Get-ChildItem $capDir -Filter *.jpg) { $capArgs += @("-F", "files=@$($f.FullName);type=image/jpeg") }
+$capUpload = (& curl.exe @capArgs) | ConvertFrom-Json
+Check "uploaded 12 photos to one listing" ($capUpload.photos.Count -eq 12)
+
+Write-Host "  ....  generating from 12 photos" -ForegroundColor DarkGray
+$sw2 = [Diagnostics.Stopwatch]::StartNew()
+$capPkg = Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($capListing.id)/package" -Headers $H
+$sw2.Stop()
+Check "12 photos -> at most 8 slides (captioning capped)" ($capPkg.slides.Count -le 8)
+Check "12-photo run finished in $([int]$sw2.Elapsed.TotalSeconds)s vs $([int]$twoPhotoSeconds)s for 2 (concurrent, not serial)" `
+  ($sw2.Elapsed.TotalSeconds -lt 45)
+Remove-Item $capDir -Recurse -Force
+
+# --- Checks needing their own backend instance, on spare ports ---
+$backendDir = Join-Path (Split-Path -Parent $PSScriptRoot) "backend"
+$haveUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
+
+function Stop-Backend($port) {
+  foreach ($c in @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
+    Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue
+  }
+  Start-Sleep -Milliseconds 900
+}
+
+function Start-Backend($port, $dbPath, $badKey) {
+  $savedDb = $env:L2C_DB_PATH; $savedMedia = $env:L2C_MEDIA_DIR; $savedKey = $env:OPENROUTER_API_KEY
+  $env:L2C_DB_PATH = $dbPath
+  $env:L2C_MEDIA_DIR = "$dbPath-media"
+  if ($badKey) { $env:OPENROUTER_API_KEY = $badKey }
+  Start-Process -FilePath "uv" -WorkingDirectory $backendDir -PassThru -WindowStyle Hidden `
+    -ArgumentList "run", "uvicorn", "app.main:app", "--port", "$port" | Out-Null
+  if ($null -eq $savedDb)    { Remove-Item Env:\L2C_DB_PATH -ErrorAction SilentlyContinue }        else { $env:L2C_DB_PATH = $savedDb }
+  if ($null -eq $savedMedia) { Remove-Item Env:\L2C_MEDIA_DIR -ErrorAction SilentlyContinue }      else { $env:L2C_MEDIA_DIR = $savedMedia }
+  if ($null -eq $savedKey)   { Remove-Item Env:\OPENROUTER_API_KEY -ErrorAction SilentlyContinue } else { $env:OPENROUTER_API_KEY = $savedKey }
+  for ($i = 0; $i -lt 40; $i++) {
+    try { if ((Invoke-RestMethod "http://localhost:$port/health").status -eq "ok") { return $true } } catch {}
+    Start-Sleep -Milliseconds 500
+  }
+  return $false
+}
+
+# Seed a throwaway instance with an agent, a listing, and one photo.
+function Seed-Instance($url) {
+  $creds = @{ email = "seed+$(Get-Random)@studio.com"; password = "secret123" } | ConvertTo-Json
+  $a = Invoke-RestMethod -Method Post -Uri "$url/api/auth/signup" -Body $creds -ContentType "application/json"
+  $body = @{ title = "Scratch listing"; location = "Wailea, Maui"; price = 4200000 } | ConvertTo-Json
+  $l = Invoke-RestMethod -Method Post -Uri "$url/api/listings" -Body $body -ContentType "application/json" `
+        -Headers @{ Authorization = "Bearer $($a.token)" }
+  & curl.exe -s -X POST "$url/api/listings/$($l.id)/photos" -H "Authorization: Bearer $($a.token)" `
+    -F "files=@$($photos[0].FullName);type=image/jpeg" | Out-Null
+  return @{ token = $a.token; listingId = $l.id }
+}
+
+if (-not $haveUv) {
+  Write-Host "  SKIP  error-path and restart checks (need uv and backend/ in this checkout)" -ForegroundColor Yellow
+} else {
+  # An unusable API key must surface as 502, not 500 or a hang.
+  $errPort = 8099
+  Stop-Backend $errPort
+  $errDb = Join-Path $env:TEMP "l2c-badkey-$(Get-Random).db"
+  if (Start-Backend $errPort $errDb "sk-or-v1-definitely-invalid") {
+    $errUrl = "http://localhost:$errPort"
+    $seed = Seed-Instance $errUrl
+    $errCode = 0
+    try {
+      Invoke-RestMethod -Method Post -Uri "$errUrl/api/listings/$($seed.listingId)/package" `
+        -Headers @{ Authorization = "Bearer $($seed.token)" }
+    } catch { $errCode = $_.Exception.Response.StatusCode.value__ }
+    Check "unusable OPENROUTER_API_KEY -> 502 (not 500)" ($errCode -eq 502)
+  } else {
+    Check "spare instance for the error-path check started" $false
+  }
+  Stop-Backend $errPort
+
+  # Restarting on a populated DB must drop and recreate cleanly - this is what
+  # would break if the new tables were dropped in the wrong FK order.
+  $wipePort = 8098
+  Stop-Backend $wipePort
+  $wipeDb = Join-Path $env:TEMP "l2c-wipe-$(Get-Random).db"
+  if (Start-Backend $wipePort $wipeDb $null) {
+    $wipeUrl = "http://localhost:$wipePort"
+    $seed = Seed-Instance $wipeUrl
+    $seedH = @{ Authorization = "Bearer $($seed.token)" }
+    Write-Host "  ....  generating on the scratch instance before restarting" -ForegroundColor DarkGray
+    Invoke-RestMethod -Method Post -Uri "$wipeUrl/api/listings/$($seed.listingId)/package" -Headers $seedH | Out-Null
+
+    Stop-Backend $wipePort
+    $restarted = Start-Backend $wipePort $wipeDb $null
+    Check "restart on a populated DB succeeds (table drop order is right)" $restarted
+
+    $goneCode = 0
+    try { Invoke-RestMethod -Uri "$wipeUrl/api/listings/$($seed.listingId)/package" -Headers $seedH }
+    catch { $goneCode = $_.Exception.Response.StatusCode.value__ }
+    Check "restart wipes the package and its session (401/404)" (($goneCode -eq 401) -or ($goneCode -eq 404))
+  } else {
+    Check "spare instance for the restart check started" $false
+  }
+  Stop-Backend $wipePort
+}
 
 Write-Host ""
 Write-Host "  Package for listing $($listing.id): $base/listings/package/?id=$($listing.id)" -ForegroundColor DarkGray

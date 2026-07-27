@@ -132,7 +132,19 @@ def _voice_brief(sample_text: str, tone_notes: str) -> str:
     if tone_notes:
         parts.append(f"Tone notes from the agent:\n{tone_notes}")
     if sample_text:
-        parts.append(f"Writing samples from the agent:\n{sample_text[:6000]}")
+        # The guard sits beside the samples rather than in the system prompt:
+        # these describe other listings, and the model will otherwise carry
+        # their facts across (a "brand-new roof", an open house that is not
+        # happening) into copy the agent would publish.
+        parts.append(
+            "Writing samples from the agent, advertising OTHER properties."
+            " Match them closely: if they are clipped and declarative, write"
+            " clipped and declarative; if they run long and unhurried, do the"
+            " same. Borrow their sentence length, punctuation, and turns of"
+            " phrase. Take only the voice -- every feature, condition, price,"
+            " and time in your copy must come from the LISTING above, never"
+            f" from these samples:\n{sample_text[:6000]}"
+        )
     if not parts:
         return (
             "The agent has not provided writing samples. Use a warm, confident,"

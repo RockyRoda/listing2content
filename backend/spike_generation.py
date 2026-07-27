@@ -45,7 +45,12 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit("Usage: uv run python spike_generation.py photo.jpg [more.jpg ...]")
 
-    draft = run([Path(arg) for arg in sys.argv[1:]])
+    paths = [Path(arg) for arg in sys.argv[1:]]
+    missing = [str(p) for p in paths if not p.is_file()]
+    if missing:
+        sys.exit("No such photo: " + ", ".join(missing))
+
+    draft = run(paths)
     for index, slide in enumerate(draft.carousel_slides, start=1):
         print(f"Slide {index} (photo {slide.photo_number}): {slide.caption}")
     for caption in draft.captions:

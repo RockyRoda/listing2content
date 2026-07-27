@@ -83,11 +83,11 @@ class ListingSummary(BaseModel):
     created_at: str
 
 
-def _photo_url(listing_id: int, photo_id: int) -> str:
+def photo_url(listing_id: int, photo_id: int) -> str:
     return f"/listings/{listing_id}/photos/{photo_id}"
 
 
-def _owned_listing(conn, listing_id: int, user_id: int):
+def owned_listing(conn, listing_id: int, user_id: int):
     """Return the listing row or 404 if it is missing or not owned by user."""
     row = conn.execute(
         "SELECT * FROM listings WHERE id = ? AND user_id = ?", (listing_id, user_id)
@@ -114,7 +114,7 @@ def _load_listing(conn, row) -> Listing:
                 id=p["id"],
                 original_name=p["original_name"],
                 content_type=p["content_type"],
-                url=_photo_url(row["id"], p["id"]),
+                url=photo_url(row["id"], p["id"]),
             )
             for p in photos
         ],
@@ -135,7 +135,7 @@ def create_listing(
             (user_id, *fields.values()),
         )
         conn.commit()
-        row = _owned_listing(conn, cur.lastrowid, user_id)
+        row = owned_listing(conn, cur.lastrowid, user_id)
         return _load_listing(conn, row)
 
 
@@ -159,7 +159,7 @@ def get_listing(
 ) -> Listing:
     """Fetch one listing with its photos."""
     with closing(db.connect()) as conn:
-        row = _owned_listing(conn, listing_id, user_id)
+        row = owned_listing(conn, listing_id, user_id)
         return _load_listing(conn, row)
 
 
@@ -172,7 +172,7 @@ def update_listing(
     """Update the provided fields on a listing (owner only)."""
     changes = body.model_dump(exclude_unset=True)
     with closing(db.connect()) as conn:
-        _owned_listing(conn, listing_id, user_id)
+        owned_listing(conn, listing_id, user_id)
         if changes:
             assignments = ", ".join(f"{c} = ?" for c in changes)
             conn.execute(
@@ -181,7 +181,7 @@ def update_listing(
                 (*changes.values(), listing_id),
             )
             conn.commit()
-        row = _owned_listing(conn, listing_id, user_id)
+        row = owned_listing(conn, listing_id, user_id)
         return _load_listing(conn, row)
 
 
@@ -193,7 +193,7 @@ async def upload_photos(
 ) -> Listing:
     """Upload one or more photos to a listing after validating type/size/count."""
     with closing(db.connect()) as conn:
-        _owned_listing(conn, listing_id, user_id)
+        owned_listing(conn, listing_id, user_id)
         existing = conn.execute(
             "SELECT COUNT(*) AS n FROM listing_photos WHERE listing_id = ?",
             (listing_id,),
@@ -227,7 +227,7 @@ async def upload_photos(
                 (listing_id, filename, original_name, content_type),
             )
         conn.commit()
-        row = _owned_listing(conn, listing_id, user_id)
+        row = owned_listing(conn, listing_id, user_id)
         return _load_listing(conn, row)
 
 
@@ -239,7 +239,7 @@ def get_photo(
 ) -> FileResponse:
     """Stream a photo's bytes to its owner."""
     with closing(db.connect()) as conn:
-        _owned_listing(conn, listing_id, user_id)
+        owned_listing(conn, listing_id, user_id)
         row = conn.execute(
             "SELECT filename, content_type FROM listing_photos"
             " WHERE id = ? AND listing_id = ?",
@@ -258,7 +258,7 @@ def delete_photo(
 ) -> Listing:
     """Remove a photo from a listing (owner only)."""
     with closing(db.connect()) as conn:
-        _owned_listing(conn, listing_id, user_id)
+        owned_listing(conn, listing_id, user_id)
         row = conn.execute(
             "SELECT filename FROM listing_photos WHERE id = ? AND listing_id = ?",
             (photo_id, listing_id),
@@ -268,5 +268,5 @@ def delete_photo(
         conn.execute("DELETE FROM listing_photos WHERE id = ?", (photo_id,))
         conn.commit()
         storage.delete_photo(row["filename"])
-        listing = _owned_listing(conn, listing_id, user_id)
+        listing = owned_listing(conn, listing_id, user_id)
         return _load_listing(conn, listing)

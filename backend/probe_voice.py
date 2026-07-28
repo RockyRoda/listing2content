@@ -6,10 +6,13 @@ Two questions, one pass:
      advertises a different property, so any of its facts appearing is a
      false claim about the listing being marketed.
 
-Holds the listing and photo captions fixed and varies only what is asked for,
-so repeated runs measure the model's sampling rather than changed inputs.
+By default this captions the photos once and reuses that caption, so repeated
+runs measure the assembly step's sampling alone. That default hides leaks: the
+API re-captions on every generation, and the leak only appears when the caption
+varies (0/60 fixed against 2/36 fresh). Pass --fresh-captions to measure a real
+leak rate; leave it off only to isolate the assembly step.
 
-Run: uv run python probe_voice.py --runs 12 --photos 1 --tone ""
+Run: uv run python probe_voice.py --runs 12 --tone "" --fresh-captions
 """
 
 import argparse
@@ -23,7 +26,11 @@ from dotenv import load_dotenv
 sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from app.generation import assemble_package, describe_photo  # noqa: E402
+from app.generation import (  # noqa: E402
+    assemble_package,
+    describe_photo,
+    generate_package,
+)
 
 LISTING = {
     "title": "Oceanfront Villa Kai",
@@ -38,6 +45,11 @@ PHOTOS = [
     (Path(r"C:\Windows\Web\Wallpaper\Spotlight\img14.jpg"), "image/jpeg"),
     (Path(r"C:\Windows\Web\Wallpaper\ThemeA\img20.jpg"), "image/jpeg"),
 ]
+
+# The voice check in scripts/verify-phase4.ps1 leaks where this probe does not.
+# These three flags each reproduce one way its inputs differ, so the difference
+# can be bisected. All three together are the smoke test's exact shape.
+SMOKE_PHOTO = (Path(r"C:\Windows\Web\Wallpaper\ThemeA\img20.jpg"), "image/jpeg")
 
 # Writing samples advertising a DIFFERENT property than the one generated for.
 SAMPLES = {
@@ -84,24 +96,43 @@ def main() -> None:
     parser.add_argument("--sample", default="terse", choices=sorted(SAMPLES))
     parser.add_argument("--tone", default="", help="tone_notes, empty by default")
     parser.add_argument("--workers", type=int, default=3, help="lower this on rate limits")
+    parser.add_argument("--smoke-photo", action="store_true",
+                        help="caption the photo the smoke test uses, not this probe's")
+    parser.add_argument("--thin-listing", action="store_true",
+                        help="drop interior_sqft, as the smoke test's listing does")
+    parser.add_argument("--bom", action="store_true",
+                        help="prefix a UTF-8 BOM and use CRLF, as the smoke test's upload does")
+    parser.add_argument("--fresh-captions", action="store_true",
+                        help="re-caption the photo every run, as the API does, instead"
+                             " of captioning once and holding it fixed")
     args = parser.parse_args()
 
-    photos = PHOTOS[: args.photos]
-    descriptions = [describe_photo(*photo) for photo in photos]
+    listing = dict(LISTING)
+    if args.thin_listing:
+        del listing["interior_sqft"]
+    sample = SAMPLES[args.sample]
+    if args.bom and sample:
+        sample = "﻿" + sample.replace("\n", "\r\n")
+    photos = [SMOKE_PHOTO] if args.smoke_photo else PHOTOS[: args.photos]
+
     print(
-        f"sample={args.sample} photos={args.photos} tone={args.tone!r}"
+        f"sample={args.sample} photos={len(photos)} tone={args.tone!r}"
+        f" smoke_photo={args.smoke_photo} thin_listing={args.thin_listing}"
+        f" bom={args.bom} fresh_captions={args.fresh_captions}"
         f" -> {args.runs} generations\n"
     )
 
+    if args.fresh_captions:
+        def one_run(_):
+            return generate_package(listing, photos, sample, args.tone)
+    else:
+        descriptions = [describe_photo(*photo) for photo in photos]
+
+        def one_run(_):
+            return assemble_package(listing, descriptions, sample, args.tone)
+
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        drafts = list(
-            pool.map(
-                lambda _: assemble_package(
-                    LISTING, descriptions, SAMPLES[args.sample], args.tone
-                ),
-                range(args.runs),
-            )
-        )
+        drafts = list(pool.map(one_run, range(args.runs)))
 
     lengths, leaked_runs = [], 0
     for index, draft in enumerate(drafts, start=1):

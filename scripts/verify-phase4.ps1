@@ -196,9 +196,9 @@ Check "terse voice writes shorter than no voice ($([math]::Round($voiceWords, 1)
   ($voiceWords -lt $ctrlWords)
 
 # The sample advertises a different property - none of its facts may surface.
-# This one is genuinely flaky: measured at 1 leak in 37 runs (~3%), down from
-# 1 in 8 before the guard in generation.py's _voice_brief. A failure here is
-# the real defect recurring, not a broken check - see the PR discussion.
+# This one is genuinely flaky: 2 leaks in 36 runs (~6%) with the guard in
+# generation.py's _voice_brief, down from 1 in 8 without it. A failure here is
+# the real defect recurring, not a broken check - see docs/VOICE-CONTAMINATION.md.
 $copy = ((@($vPkg.captions | ForEach-Object { $_.text })) + (@($vPkg.slides | ForEach-Object { $_.caption }))) -join " "
 $foreign = @("corner lot", "sycamore", "furnace", "basement", "elementary",
              "open saturday", "new roof", "roof is new", "walk to the")

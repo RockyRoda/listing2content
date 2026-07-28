@@ -1,7 +1,9 @@
 # Open issue: voice sample facts leak into listing copy
 
-Status as of 2026-07-27. Found while testing whether the Phase 4 voice
-profile actually changes the writing (PR #9). Not resolved.
+Status as of 2026-07-28. Found while testing whether the Phase 4 voice
+profile actually changes the writing (PR #9). The defect is still open, but
+the probe/smoke-test contradiction that blocked it is resolved: the probe was
+measuring the wrong thing. Measured leak rate is now **2/36 (~6%)**.
 
 ## The defect
 
@@ -35,47 +37,52 @@ v1 showed the two goals are coupled: suppressing fact-borrowing also
 suppressed style-borrowing. v2 asks for the style explicitly *and* forbids
 the facts, which recovered both.
 
-## The unresolved contradiction
+## Why the probe disagreed with the smoke test (resolved 2026-07-28)
 
-v2 measures clean in the Python probe but leaks in the PowerShell smoke test:
+**The probe captioned each photo once and reused that caption for every
+run.** `generate_package` re-captions on every call, so the API varies the
+photo description that the smoke test never held still. The probe was
+resampling the assembly step against one frozen caption, which is a strictly
+narrower experiment than the one the smoke test runs.
 
-- `backend/probe_voice.py`: **0 leaks / 36 runs**
-  (24 with 2 photos + no tone notes, 12 with 1 photo + tone notes set)
-- `scripts/verify-phase4.ps1` voice check: **2 leaks / 3 runs**, both
-  `"open saturday"`
+Freezing the caption suppressed the leak completely:
 
-Two out of three against zero out of thirty-six is not sampling noise. The
-probe and the smoke test differ systematically somewhere, and until that is
-identified the true leak rate is unknown. An earlier estimate of "~3%" in
-the PR discussion was wrong - it averaged the two populations as if they
-were one.
+| Probe configuration | Leaks |
+|---|---|
+| Fixed caption, 2 photos / 1 photo / tone notes set | 0 / 36 |
+| Fixed caption, 1 photo + no tone notes | 0 / 12 |
+| Fixed caption, exact smoke-test inputs | 0 / 12 |
+| **Fresh caption per run, exact smoke-test inputs** | **2 / 36** |
 
-## Leading hypothesis, and the next experiment
+Both fresh-caption leaks were `"open saturday"`, matching the smoke test.
+`probe_voice.py --fresh-captions` reproduces the defect; without that flag
+the probe cannot see it, whatever its other settings.
 
-Every clean probe run had **either** 2 photos **or** tone notes set. The
-smoke test's `Invoke-VoiceRun` uses **1 photo and no tone notes**, so the
-writing sample is the only voice input and the only filler for a thin photo
-brief. That exact combination has never been probed.
+Ruled out along the way, each measured at 0/12 with a fixed caption, so none
+of these is the cause:
 
-Run this first:
-
-```bash
-cd backend
-uv run python probe_voice.py --runs 12 --photos 1 --tone ""
-```
-
-If it reproduces, the cause is confirmed: the guard weakens when the sample
-is the sole voice input. If it comes back clean, the difference is in the
-delivery path, not the prompt - check these next:
-
+- **The queued hypothesis** - 1 photo with no tone notes, leaving the sample
+  as the only voice input. Clean.
 - **BOM and line endings.** The smoke test writes the sample with
   `Out-File -Encoding utf8`, which in Windows PowerShell 5.1 emits a UTF-8
-  BOM and CRLF endings. `voice_profiles.put_voice_profile` decodes with
-  `errors="ignore"` and does not strip `﻿`, so the stored text starts
-  with a BOM. The probe passes a plain Python string with `\n`.
-- **Listing fields.** The probe's `LISTING` includes `interior_sqft`;
-  `Invoke-VoiceRun` omits `interior_sqft`, `mls_number`, and `description`,
-  so the model has less real material to work with.
+  BOM and CRLF endings; `put_voice_profile` strips whitespace but not `﻿`.
+  Reproduced with `--bom`. Clean.
+- **Listing fields.** `Invoke-VoiceRun` omits `interior_sqft`, `mls_number`,
+  and `description`. Reproduced with `--thin-listing`. Clean.
+- **A different photo.** The probe's first photo is
+  `Spotlight\img14.jpg`; the smoke test's is `ThemeA\img20.jpg`. Reproduced
+  with `--smoke-photo`. Clean.
+
+### What this does and does not settle
+
+The true leak rate under v2 is about **6% (2/36)**, not zero. The earlier
+"~3%" was wrong for the reason already recorded, and "0/36" was wrong because
+it froze an input the real path varies.
+
+It does not fully explain the smoke test's 2-in-3. At a 6% rate that streak
+has probability ~0.01, so either it was an unlucky run or a smaller residual
+difference remains. With n=3 that cannot be settled; it needs more smoke-test
+runs, not more analysis. Treat ~6% as the working figure.
 
 ## Candidate fixes, once the cause is known
 
@@ -91,14 +98,22 @@ delivery path, not the prompt - check these next:
    the product's premise is a draft that is nearly ready to post.
 
 Option 2 is the most promising - it removes the foreign facts from the
-context entirely rather than asking the model to ignore them.
+context entirely rather than asking the model to ignore them. Prompt wording
+is now a poor bet: v2 already asks for exactly the right thing and still
+fails 6% of the time, and the failure rides on caption variation, which no
+amount of rewording controls.
+
+Whatever is tried next, measure it with `--fresh-captions` and against the
+6% baseline. A fixed-caption run cannot tell success from the masking effect
+described above.
 
 ## Also still open
 
 - **Photo-numbering leak.** A separate bug where shot directions said "from
   Photo 1". Fixed by the same placement move (`NUMBERING_REMINDER`), measured
-  0 / 40. But that was measured under probe conditions only. It may share
-  this root cause and should be re-measured at the smoke-test shape.
+  0 / 40 - but every one of those runs held the caption fixed, which is now
+  known to hide exactly this kind of failure. That measurement should be
+  redone with `--fresh-captions` before the fix is trusted.
 - **Docker.** Phase 4 has never been executed in the container.
   `.\scripts\start-windows.ps1` then `.\scripts\verify-phase4.ps1`. The path
   arithmetic was verified by inspection only.
@@ -107,5 +122,11 @@ context entirely rather than asking the model to ignore them.
 
 `scripts\verify-phase4.ps1` is the end-to-end check (29 checks, needs the app
 running at :8000 and real LLM calls). Its voice section is the one that
-surfaces this. `backend\probe_voice.py` is the isolation tool. Backend unit
-tests stay offline and green: `cd backend && uv run pytest`.
+surfaces this. `backend\probe_voice.py` is the isolation tool - reproduce with:
+
+```bash
+cd backend
+uv run python probe_voice.py --runs 24 --tone "" --fresh-captions
+```
+
+Backend unit tests stay offline and green: `cd backend && uv run pytest`.

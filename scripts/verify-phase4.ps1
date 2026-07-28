@@ -149,6 +149,64 @@ Check "12-photo run finished in $([int]$sw2.Elapsed.TotalSeconds)s vs $([int]$tw
   ($sw2.Elapsed.TotalSeconds -lt 45)
 Remove-Item $capDir -Recurse -Force
 
+# --- The voice profile shapes the copy, and its facts stay out of it ---
+# Compared against a control agent with no profile rather than a fixed word
+# count: absolute sentence length drifts run to run, but a terse profile
+# should always come out shorter than no profile at all. Measured over 12
+# runs each: 8.6 words with a terse profile against 17.1 with none.
+function Measure-SentenceWords($package) {
+  $text = ((@($package.captions | ForEach-Object { $_.text })) +
+           (@($package.slides | ForEach-Object { $_.caption }))) -join " "
+  $parts = @($text -split '[.!?]+' | Where-Object { $_.Trim().Length -gt 0 })
+  return ($parts | ForEach-Object { ($_.Trim() -split '\s+').Count } | Measure-Object -Average).Average
+}
+
+# Both sides use a fresh agent so the only difference is the profile. The main
+# agent already carries "Warm, unhurried" tone notes, which fight a terse
+# sample and would mask the effect being measured.
+function Invoke-VoiceRun($title, $sampleFile) {
+  $a = Invoke-RestMethod -Method Post -Uri "$base/api/auth/signup" -ContentType "application/json" `
+    -Body (@{ email = "voice+$(Get-Random)@studio.com"; password = "secret123" } | ConvertTo-Json)
+  $h = @{ Authorization = "Bearer $($a.token)" }
+  if ($sampleFile) {
+    & curl.exe -s -X PUT "$base/api/voice-profile" -H "Authorization: Bearer $($a.token)" `
+      -F "files=@$sampleFile;type=text/plain" | Out-Null
+  }
+  $body = @{ title = $title; location = "Wailea, Maui"; price = 8950000; beds = 4; baths = 4.5;
+             features = "Infinity pool, outdoor kitchen, private beach path" } | ConvertTo-Json
+  $l = Invoke-RestMethod -Method Post -Uri "$base/api/listings" -Body $body -ContentType "application/json" -Headers $h
+  & curl.exe -s -X POST "$base/api/listings/$($l.id)/photos" -H "Authorization: Bearer $($a.token)" `
+    -F "files=@$($photos[0].FullName);type=image/jpeg" | Out-Null
+  return Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($l.id)/package" -Headers $h
+}
+
+$voiceFile = Join-Path $env:TEMP "l2c-voice-$(Get-Random).txt"
+@"
+Three beds. Two baths. Corner lot on Sycamore. Priced to move.
+Open Saturday, noon to three. Bring your agent. It will not last.
+Roof is new. Furnace is new. Basement is dry. Nothing left to do.
+Walk to the elementary school. Call me. I answer my phone.
+"@ | Out-File -FilePath $voiceFile -Encoding utf8
+
+Write-Host "  ....  generating a no-voice control, then a terse-voice run" -ForegroundColor DarkGray
+$ctrlWords = Measure-SentenceWords (Invoke-VoiceRun "Control villa" $null)
+$vPkg = Invoke-VoiceRun "Voice check villa" $voiceFile
+$voiceWords = Measure-SentenceWords $vPkg
+Check "terse voice writes shorter than no voice ($([math]::Round($voiceWords, 1)) vs $([math]::Round($ctrlWords, 1)) words)" `
+  ($voiceWords -lt $ctrlWords)
+
+# The sample advertises a different property - none of its facts may surface.
+# This one is genuinely flaky: measured at 1 leak in 37 runs (~3%), down from
+# 1 in 8 before the guard in generation.py's _voice_brief. A failure here is
+# the real defect recurring, not a broken check - see the PR discussion.
+$copy = ((@($vPkg.captions | ForEach-Object { $_.text })) + (@($vPkg.slides | ForEach-Object { $_.caption }))) -join " "
+$foreign = @("corner lot", "sycamore", "furnace", "basement", "elementary",
+             "open saturday", "new roof", "roof is new", "walk to the")
+$leaked = @($foreign | Where-Object { ($copy + " " + $vPkg.reel_script) -match [regex]::Escape($_) })
+Check "voice sample's facts stay out of the listing copy" ($leaked.Count -eq 0)
+if ($leaked.Count -gt 0) { Write-Host "        leaked: $($leaked -join ', ')" -ForegroundColor Red }
+Remove-Item $voiceFile -Force
+
 # --- Checks needing their own backend instance, on spare ports ---
 $backendDir = Join-Path (Split-Path -Parent $PSScriptRoot) "backend"
 $haveUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)

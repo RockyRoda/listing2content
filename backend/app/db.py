@@ -63,6 +63,7 @@ CREATE TABLE listing_photos (
 CREATE TABLE voice_profiles (
     user_id INTEGER PRIMARY KEY REFERENCES users(id),
     sample_text TEXT NOT NULL DEFAULT '',
+    style_notes TEXT NOT NULL DEFAULT '',
     tone_notes TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

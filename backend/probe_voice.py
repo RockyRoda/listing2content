@@ -1,5 +1,8 @@
 """Measure how the voice profile affects generated copy, and whether it leaks.
 
+Runs the full path the API uses: distil the sample with extract_style, then
+generate from the descriptors alone. Both stages are checked for leaks.
+
 Two questions, one pass:
   1. Does the sample change the writing? (average sentence length per run)
   2. Do the sample's FACTS leak into the listing copy? The built-in sample
@@ -29,6 +32,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from app.generation import (  # noqa: E402
     assemble_package,
     describe_photo,
+    extract_style,
     generate_package,
 )
 
@@ -89,6 +93,30 @@ def avg_sentence_words(text: str) -> float:
     return sum(len(p.split()) for p in parts) / max(len(parts), 1)
 
 
+def probe_style(sample: str, runs: int, workers: int) -> None:
+    """Extract style repeatedly and report descriptors carrying the sample's facts.
+
+    Extraction is the only place the samples are read, so a clean result here
+    means no foreign fact can reach generation at all.
+    """
+    print(f"extract_style only -> {runs} extractions\n")
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        styles = list(pool.map(lambda _: extract_style(sample), range(runs)))
+
+    leaked = 0
+    for index, style in enumerate(styles, start=1):
+        hits = [f for f in FOREIGN_FACTS if re.search(f, style.lower())]
+        if hits:
+            leaked += 1
+            print(f"  run {index}: LEAK {', '.join(hits)}")
+            for line in style.splitlines():
+                if any(re.search(f, line.lower()) for f in hits):
+                    print(f"          {line.strip()[:110]}")
+        else:
+            print(f"  run {index}: clean")
+    print(f"\nstyle descriptors carrying facts: {leaked}/{runs}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=12)
@@ -105,6 +133,9 @@ def main() -> None:
     parser.add_argument("--fresh-captions", action="store_true",
                         help="re-caption the photo every run, as the API does, instead"
                              " of captioning once and holding it fixed")
+    parser.add_argument("--style-only", action="store_true",
+                        help="only run extract_style, repeatedly, and check the"
+                             " descriptors for the sample's facts")
     args = parser.parse_args()
 
     listing = dict(LISTING)
@@ -115,6 +146,18 @@ def main() -> None:
         sample = "﻿" + sample.replace("\n", "\r\n")
     photos = [SMOKE_PHOTO] if args.smoke_photo else PHOTOS[: args.photos]
 
+    if args.style_only:
+        probe_style(sample, args.runs, args.workers)
+        return
+
+    # What the API stores at upload time and passes to every later generation.
+    style_notes = extract_style(sample)
+    if style_notes:
+        print(f"extracted style:\n{style_notes}\n")
+        leaked_style = [f for f in FOREIGN_FACTS if re.search(f, style_notes.lower())]
+        if leaked_style:
+            print(f"  STYLE CARRIES FACTS: {', '.join(leaked_style)}\n")
+
     print(
         f"sample={args.sample} photos={len(photos)} tone={args.tone!r}"
         f" smoke_photo={args.smoke_photo} thin_listing={args.thin_listing}"
@@ -124,12 +167,12 @@ def main() -> None:
 
     if args.fresh_captions:
         def one_run(_):
-            return generate_package(listing, photos, sample, args.tone)
+            return generate_package(listing, photos, style_notes, args.tone)
     else:
         descriptions = [describe_photo(*photo) for photo in photos]
 
         def one_run(_):
-            return assemble_package(listing, descriptions, sample, args.tone)
+            return assemble_package(listing, descriptions, style_notes, args.tone)
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         drafts = list(pool.map(one_run, range(args.runs)))

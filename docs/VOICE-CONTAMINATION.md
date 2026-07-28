@@ -1,9 +1,12 @@
-# Open issue: voice sample facts leak into listing copy
+# Voice sample facts leaking into listing copy - fixed
 
 Status as of 2026-07-28. Found while testing whether the Phase 4 voice
-profile actually changes the writing (PR #9). The defect is still open, but
-the probe/smoke-test contradiction that blocked it is resolved: the probe was
-measuring the wrong thing. Measured leak rate is now **2/36 (~6%)**.
+profile actually changes the writing (PR #9). **Fixed** by removing the raw
+samples from the generation prompt entirely (option 2 below): 0 leaks / 36
+end-to-end runs, against ~6% before.
+
+The history is kept because two rounds of prompt fixes looked successful and
+were not, and the reason is a trap worth not repeating.
 
 ## The defect
 
@@ -19,7 +22,7 @@ marketing this is a false claim about a property and a fabricated event -
 materially worse than a style wobble. It is the most serious open problem in
 Phase 4.
 
-## What has been tried
+## What has been tried (all superseded by the fix)
 
 `_voice_brief()` in `backend/app/generation.py` builds the AGENT VOICE block.
 The guard lives there rather than in `ASSEMBLY_PROMPT`, because an earlier
@@ -84,36 +87,63 @@ has probability ~0.01, so either it was an unlucky run or a smaller residual
 difference remains. With n=3 that cannot be settled; it needs more smoke-test
 runs, not more analysis. Treat ~6% as the working figure.
 
-## Candidate fixes, once the cause is known
+## The fix: the generator never sees the samples
 
-1. Strengthen the guard specifically when `tone_notes` is empty.
-2. Stop passing raw sample text. Extract style descriptors once (sentence
-   length, register, punctuation habits) and store those instead, so no
-   foreign facts ever reach the assembly prompt. Structural, ends the class
-   of bug, costs one extra LLM call at voice-profile upload time.
-3. Validate after generation: flag copy containing figures or claims absent
-   from the listing. Catches the whole family, including hallucinations that
-   do not come from the sample.
-4. Accept it and rely on Phase 5's human approve/edit pass. Cheapest, but
-   the product's premise is a draft that is nearly ready to post.
+Prompt wording was a dead end - v2 already asked for exactly the right thing
+and still failed ~6% of the time, and the failure rides on caption variation
+that no rewording controls. So the samples were removed from the generation
+context instead.
 
-Option 2 is the most promising - it removes the foreign facts from the
-context entirely rather than asking the model to ignore them. Prompt wording
-is now a poor bet: v2 already asks for exactly the right thing and still
-fails 6% of the time, and the failure rides on caption variation, which no
-amount of rewording controls.
+`generation.extract_style()` distils the samples into three form-only
+descriptors (`StyleProfile`: sentence rhythm, vocabulary, punctuation).
+`put_voice_profile` runs it once on upload and stores the result in
+`voice_profiles.style_notes`; `create_package` passes `style_notes` to
+generation and never reads `sample_text`. The samples are still stored and
+shown back to the agent, but nothing downstream reads them.
 
-Whatever is tried next, measure it with `--fresh-captions` and against the
-6% baseline. A fixed-caption run cannot tell success from the masking effect
-described above.
+Cost is one extra LLM call per voice-profile upload, not per generation.
+
+### The extractor leaked too, at first
+
+The first version of `STYLE_PROMPT` invited short illustrative quotes ("where
+it helps, quote a short phrase that is purely stylistic"). The model promptly
+used a **content-bearing** quote to illustrate a structural point:
+
+> Repetition of structure ("Roof is new. Furnace is new.") is common
+
+That would have piped the exact fact being guarded against straight into
+every generation. `STYLE_PROMPT` now forbids quoting outright and requires
+patterns be described instead. **Do not re-add the quoting allowance.**
+
+### Measurements after the fix
+
+All with `--fresh-captions`, at the smoke test's input shape:
+
+| Check | Result |
+|---|---|
+| Descriptors carrying sample facts (terse) | 0 / 20 |
+| Descriptors carrying sample facts (lyrical) | 0 / 12 |
+| Foreign facts in generated copy (terse) | 0 / 24 |
+| Foreign facts in generated copy (lyrical) | 0 / 12 |
+
+Voice strength improved rather than regressed, and the profiles separate
+sharply - terse averages **3.4** words/sentence, lyrical **21.6**, against a
+no-voice control of ~17.1. Descriptors steer harder than raw samples did
+(8.6 words for terse under v2), because a stated instruction outweighs an
+implied example. Worth watching that a terse profile does not become clipped
+to the point of reading badly.
+
+`scripts\verify-phase4.ps1`: 28/29, both voice checks passing.
 
 ## Also still open
 
-- **Photo-numbering leak.** A separate bug where shot directions said "from
-  Photo 1". Fixed by the same placement move (`NUMBERING_REMINDER`), measured
-  0 / 40 - but every one of those runs held the caption fixed, which is now
-  known to hide exactly this kind of failure. That measurement should be
-  redone with `--fresh-captions` before the fix is trusted.
+- **Photo-numbering leak - now confirmed live.** Shot directions sometimes
+  say "from Photo 1". `NUMBERING_REMINDER` measured 0 / 40, but every one of
+  those runs held the caption fixed, which is now known to hide exactly this
+  kind of failure. It **failed in the smoke test on 2026-07-28**, so the fix
+  does not hold. Unrelated to the voice work: that check runs on an agent
+  with tone notes and no samples, whose prompt is byte-identical before and
+  after the style-extraction change. Re-measure with `--fresh-captions`.
 - **Docker.** Phase 4 has never been executed in the container.
   `.\scripts\start-windows.ps1` then `.\scripts\verify-phase4.ps1`. The path
   arithmetic was verified by inspection only.
@@ -121,12 +151,18 @@ described above.
 ## How to resume
 
 `scripts\verify-phase4.ps1` is the end-to-end check (29 checks, needs the app
-running at :8000 and real LLM calls). Its voice section is the one that
-surfaces this. `backend\probe_voice.py` is the isolation tool - reproduce with:
+running at :8000 and real LLM calls). `backend\probe_voice.py` is the
+isolation tool:
 
 ```bash
 cd backend
-uv run python probe_voice.py --runs 24 --tone "" --fresh-captions
+uv run python probe_voice.py --runs 20 --style-only          # extractor alone
+uv run python probe_voice.py --runs 24 --tone "" --fresh-captions   # full path
 ```
+
+`--fresh-captions` is not optional for any leak measurement - without it the
+probe cannot see this class of bug at all. `--style-only` is the cheap check:
+extraction is the one place the samples are read, so clean descriptors mean
+no foreign fact can reach generation.
 
 Backend unit tests stay offline and green: `cd backend && uv run pytest`.

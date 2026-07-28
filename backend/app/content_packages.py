@@ -135,7 +135,7 @@ def create_package(
             (listing_id, generation.MAX_CAPTIONED_PHOTOS),
         ).fetchall()
         voice = conn.execute(
-            "SELECT sample_text, tone_notes FROM voice_profiles WHERE user_id = ?",
+            "SELECT style_notes, tone_notes FROM voice_profiles WHERE user_id = ?",
             (user_id,),
         ).fetchone()
 
@@ -149,7 +149,7 @@ def create_package(
         draft = generation.generate_package(
             {field: listing[field] for field in EDITABLE_FIELDS},
             [(storage.photo_path(p["filename"]), p["content_type"]) for p in photos],
-            voice["sample_text"] if voice else "",
+            voice["style_notes"] if voice else "",
             voice["tone_notes"] if voice else "",
         )
     except Exception:

@@ -176,12 +176,19 @@ Measured 0 / 52 with fresh captions (40 runs at 2 photos, 12 at 8). Slide
 counts were correct in all 52, which is what makes positional binding safe;
 `probe_voice.py` reports that as `wrong slide count` on every run.
 
-## Also still open
+## Docker (verified 2026-07-28)
 
-- **Docker.** Phase 4 has never been executed in the container.
-  `.\scripts\start-windows.ps1` then `.\scripts\verify-phase4.ps1`. The path
-  arithmetic was verified by inspection only. Both fixes above were verified
-  against uvicorn on the host, not the container.
+Phase 4 now runs in the container: `.\scripts\start-windows.ps1` then
+`.\scripts\verify-phase4.ps1` gives **29/29**, including both fixes above.
+The photo-storage path arithmetic, previously checked by inspection only,
+works - `slide photo_url serves the image to its owner` passes. Also
+confirmed in the container: the static frontend is served, `extract_style`
+runs on upload and populates `style_notes`, and it stores clean UTF-8.
+
+One trap when checking by hand: Windows PowerShell 5.1's `Invoke-RestMethod`
+mis-decodes UTF-8, so curly quotes in `style_notes` come back as mojibake on
+the console. The stored bytes are fine - read them from SQLite before
+concluding there is an encoding bug.
 
 ## How to resume
 

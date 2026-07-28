@@ -27,12 +27,12 @@ def _listing_with_photos(client, headers, count=2):
     return lid
 
 
-def _draft(slide_numbers=(1, 2), reel="Open on the pool. Cut to the lanai."):
-    """A PackageDraft with one slide per given photo_number."""
+def _draft(slide_count=2, reel="Open on the pool. Cut to the lanai."):
+    """A PackageDraft with `slide_count` slides, bound to photos by position."""
     return generation.PackageDraft(
         carousel_slides=[
-            generation.SlideDraft(photo_number=n, caption=f"Slide for photo {n}")
-            for n in slide_numbers
+            generation.SlideDraft(caption=f"Slide for photo {n}")
+            for n in range(1, slide_count + 1)
         ],
         captions=[generation.CaptionDraft(label="Lifestyle hook", text="Golden hour.")],
         reel_script=reel,
@@ -84,9 +84,10 @@ def test_slides_reference_the_right_photos(client, auth_headers, fake_llm):
     assert slides[0]["photo_url"] == f"/listings/{lid}/photos/{photo_ids[0]}"
 
 
-def test_out_of_range_photo_number_becomes_null(client, auth_headers, fake_llm):
+def test_slide_beyond_the_photo_count_becomes_null(client, auth_headers, fake_llm):
+    """The model is asked for one slide per photo; an extra one has no photo."""
     lid = _listing_with_photos(client, auth_headers, count=1)
-    fake_llm.draft = _draft(slide_numbers=(1, 7))
+    fake_llm.draft = _draft(slide_count=2)
     slides = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()["slides"]
     assert slides[1]["listing_photo_id"] is None
     assert slides[1]["photo_url"] is None
@@ -102,7 +103,7 @@ def test_generate_replaces_the_previous_package(client, auth_headers, fake_llm):
     lid = _listing_with_photos(client, auth_headers)
     first = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()
 
-    fake_llm.draft = _draft(slide_numbers=(2,), reel="A brand new script.")
+    fake_llm.draft = _draft(slide_count=1, reel="A brand new script.")
     second = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()
 
     assert second["id"] != first["id"]

@@ -81,10 +81,14 @@ def _load_package(conn, listing_id: int) -> Package | None:
     )
 
 
-def _slide_photo_id(photo_number: int, photo_ids: list[int]) -> int | None:
-    """Resolve a draft slide's 1-based photo_number to a listing_photos id."""
-    if 1 <= photo_number <= len(photo_ids):
-        return photo_ids[photo_number - 1]
+def _slide_photo_id(position: int, photo_ids: list[int]) -> int | None:
+    """Resolve a draft slide's 0-based position to a listing_photos id.
+
+    The model is asked for one slide per photo in order, so position is the
+    binding. Any extra slide it returns has no photo and stores a null.
+    """
+    if 0 <= position < len(photo_ids):
+        return photo_ids[position]
     return None
 
 
@@ -112,7 +116,7 @@ def _replace_package(
         " (content_package_id, listing_photo_id, order_index, caption)"
         " VALUES (?, ?, ?, ?)",
         [
-            (package_id, _slide_photo_id(s.photo_number, photo_ids), i, s.caption)
+            (package_id, _slide_photo_id(i, photo_ids), i, s.caption)
             for i, s in enumerate(draft.carousel_slides)
         ],
     )

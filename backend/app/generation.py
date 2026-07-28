@@ -41,25 +41,32 @@ ASSEMBLY_PROMPT = (
     " there -- rather than a spec sheet, but keep every concrete detail"
     " accurate to the listing data and photo descriptions given."
     "\n\nProduce:"
-    "\n- carousel_slides: one slide per photo, in the order the photos are"
-    " listed, each with that photo's photo_number and a caption of at most two"
-    " sentences grounded in what that photo actually shows."
+    "\n- carousel_slides: exactly one slide per photo, in the same order as the"
+    " PHOTOS list, each a caption of at most two sentences grounded in what"
+    " that photo actually shows."
     "\n- captions: three to five post captions, each with a short label"
     " describing its angle (for example 'Lifestyle hook', 'Just listed',"
     " 'Investment angle') and the caption text."
     "\n- reel_script: a 30-45 second Reel script with spoken lines and brief"
-    " shot directions."
+    " shot directions. Write each shot direction as what the viewer sees, for"
+    " an editor who cannot see the photo list."
 )
 
-# Kept next to the numbered photo list in the user message rather than in the
-# system prompt: the model reaches for "from Photo 1" in shot directions, and
-# the reminder holds better when it sits beside the numbering it is about.
-NUMBERING_REMINDER = (
-    "The numbering above exists only to fill in each slide's photo_number."
-    " That field is the one place a photo number belongs. Never write"
-    " 'Photo 1' or similar in a caption, a script line, or a shot direction --"
-    " describe what the image shows instead, as in 'the undulating blue"
-    " sculpture', never 'the sculpture from Photo 1'."
+# Kept next to the photo list in the user message rather than in the system
+# prompt: an earlier experiment established that placement beats wording for
+# this model, and this reminder is about the list it sits beside.
+#
+# The photos used to be numbered so slides could name a photo_number. Writing
+# shot directions over a numbered manifest pulled the model into pointing back
+# at it ("the sculpture from photo 2") in 22% of runs, so the numbers are gone
+# and slides map to photos by position. Ordinals ("the first photo") survived
+# the numbers, hence the second sentence.
+SOURCE_REMINDER = (
+    "This list is your source material, not something to mention. Never refer"
+    " to these photos as photos, and never by their position: no 'photo 2',"
+    " no 'the first photo', no 'the next image'. In captions and shot"
+    " directions, name what the viewer sees instead, as in 'the undulating"
+    " blue sculpture'."
 )
 
 # Listing columns worth showing the model, with the labels used in the prompt.
@@ -108,9 +115,8 @@ class StyleProfile(BaseModel):
 
 
 class SlideDraft(BaseModel):
-    """One carousel slide, tied to a photo by its 1-based prompt number."""
+    """One carousel slide. Tied to a photo by its position in the list."""
 
-    photo_number: int
     caption: str
 
 
@@ -217,13 +223,12 @@ def assemble_package(
     tone_notes: str,
 ) -> PackageDraft:
     """Generate the content package from listing data, photos, and voice."""
-    photos = "\n".join(
-        f"Photo {n}: {text}" for n, text in enumerate(photo_descriptions, start=1)
-    )
+    photos = "\n".join(f"- {text}" for text in photo_descriptions)
     user_content = (
         f"LISTING\n{_listing_brief(listing)}"
-        f"\n\nPHOTOS\n{photos or 'No photos were provided for this listing.'}"
-        f"\n\n{NUMBERING_REMINDER}"
+        f"\n\nPHOTOS, in order\n"
+        f"{photos or 'No photos were provided for this listing.'}"
+        f"\n\n{SOURCE_REMINDER}"
         f"\n\nAGENT VOICE\n{_voice_brief(style_notes, tone_notes)}"
     )
     response = completion(
@@ -247,8 +252,8 @@ def generate_package(
 ) -> PackageDraft:
     """Caption the photos concurrently, then assemble the package from them.
 
-    Photos are captioned in parallel but returned in input order, so a draft
-    slide's 1-based photo_number indexes straight back into `photos`.
+    Photos are captioned in parallel but returned in input order, so the nth
+    draft slide belongs to the nth photo.
     """
     capped = photos[:MAX_CAPTIONED_PHOTOS]
     with ThreadPoolExecutor(max_workers=len(capped)) as pool:

@@ -80,10 +80,18 @@ Check "slides carry a photo_url"                    (-not ($pkg.slides | Where-O
 Check "every slide caption has text"                (-not ($pkg.slides | Where-Object { $_.caption.Length -lt 10 }))
 Check "caption set has 3-5 labelled captions"       (($pkg.captions.Count -ge 3) -and ($pkg.captions.Count -le 5))
 Check "reel script is substantial"                  ($pkg.reel_script.Length -gt 200)
-# Sampled, not guaranteed: the model occasionally writes "from Photo 1" into a
-# shot direction. Measured at 0 leaks in 40 runs, so a failure here means the
-# behaviour came back, not that the check is broken.
-Check "copy does not leak photo numbering"          ($pkg.reel_script -notmatch "(?i)photo\s*\d")
+# Shot directions used to point back at the source list ("the sculpture from
+# photo 2") in 22% of runs. The photos are no longer numbered in the prompt and
+# slides bind by position, measured 0 in 52 runs. Covers the ordinal form too:
+# the old check only looked for "photo <digit>" and so missed two thirds of the
+# real failures - see docs/VOICE-CONTAMINATION.md.
+$index = "\d+|one|two|three|four|five|six|seven|eight|first|second|third|fourth|last"
+$shot = "photo|image|slide|frame|pic"
+$numbering = "(?i)\b(($shot)s?\s*#?\s*($index)\b|($index)\s+($shot)\b)"
+$allCopy = (@($pkg.reel_script) + @($pkg.slides | ForEach-Object { $_.caption }) +
+            @($pkg.captions | ForEach-Object { $_.text })) -join " "
+Check "copy does not leak photo numbering"          ($allCopy -notmatch $numbering)
+if ($allCopy -match $numbering) { Write-Host "        matched: $($Matches[0])" -ForegroundColor Red }
 
 # The photos are only reachable with the bearer token.
 $img = Invoke-WebRequest -Uri "$base/api$($pkg.slides[0].photo_url)" -Headers $H -UseBasicParsing

@@ -1,12 +1,19 @@
-# Voice sample facts leaking into listing copy - fixed
+# Foreign material leaking into listing copy - fixed
 
-Status as of 2026-07-28. Found while testing whether the Phase 4 voice
-profile actually changes the writing (PR #9). **Fixed** by removing the raw
-samples from the generation prompt entirely (option 2 below): 0 leaks / 36
-end-to-end runs, against ~6% before.
+Status as of 2026-07-28. Two defects, both found while testing Phase 4's
+voice profile (PR #9), both now fixed:
 
-The history is kept because two rounds of prompt fixes looked successful and
-were not, and the reason is a trap worth not repeating.
+- **Voice sample facts** in the copy (a fabricated new roof, an open house
+  that was not happening) - fixed by keeping the samples out of the
+  generation prompt entirely. 0 / 36 runs, was ~6%.
+- **Photo numbering** in shot directions - fixed by removing the numbering
+  and reframing the shot directions. 0 / 52 runs, was 22%.
+
+Both had the same shape: material that is in the prompt for one purpose gets
+used for another, and no wording of a prohibition reliably stopped it -
+removing the material did. Both also had the same measurement trap, below.
+The history is kept because three rounds of prompt fixes looked successful
+and were not.
 
 ## The defect
 
@@ -135,18 +142,46 @@ to the point of reading badly.
 
 `scripts\verify-phase4.ps1`: 28/29, both voice checks passing.
 
+## The photo-numbering leak (fixed 2026-07-28)
+
+The same failure in a second form: shot directions pointed back at the source
+photo list. `NUMBERING_REMINDER` had measured 0 / 40 and was believed fixed.
+Re-measured properly it ran at **9 / 40 (22%)**:
+
+> `[Soft focus on the abstract blue sculpture (photo 1) in the villa's atrium]`
+> `[Close-up of the sculptural blue ribbon from the first photo]`
+
+The old figure was wrong twice over - it froze the captions, and its regex
+(`photo\s*\d`) only caught the digit form. Six of the nine real failures said
+"the second photo" or "second image" and would have passed the check.
+
+**Root cause.** The prompt asked for "brief shot directions" over a numbered
+photo manifest. A shot direction's job is to tell an editor which asset to
+use, and the numbering was the only vocabulary available for that, so the
+model used it. Note it usually *did* describe the subject ("the sculptural
+blue ribbon") and then anchored it to the source anyway - the reminder was
+half-working, and no wording of it removed the pull.
+
+**Fix**, in two parts, because removing the numbers alone was not enough:
+
+1. The photos are no longer numbered in the prompt, and `SlideDraft` no longer
+   carries `photo_number` - slides bind to photos by position. This kills
+   "photo 2", which came straight off the manifest.
+2. Ordinals survive without numbers, since the model can count an ordered
+   list. So `ASSEMBLY_PROMPT` now frames shot directions as what the viewer
+   sees "for an editor who cannot see the photo list", and `SOURCE_REMINDER`
+   forbids positional reference explicitly.
+
+Measured 0 / 52 with fresh captions (40 runs at 2 photos, 12 at 8). Slide
+counts were correct in all 52, which is what makes positional binding safe;
+`probe_voice.py` reports that as `wrong slide count` on every run.
+
 ## Also still open
 
-- **Photo-numbering leak - now confirmed live.** Shot directions sometimes
-  say "from Photo 1". `NUMBERING_REMINDER` measured 0 / 40, but every one of
-  those runs held the caption fixed, which is now known to hide exactly this
-  kind of failure. It **failed in the smoke test on 2026-07-28**, so the fix
-  does not hold. Unrelated to the voice work: that check runs on an agent
-  with tone notes and no samples, whose prompt is byte-identical before and
-  after the style-extraction change. Re-measure with `--fresh-captions`.
 - **Docker.** Phase 4 has never been executed in the container.
   `.\scripts\start-windows.ps1` then `.\scripts\verify-phase4.ps1`. The path
-  arithmetic was verified by inspection only.
+  arithmetic was verified by inspection only. Both fixes above were verified
+  against uvicorn on the host, not the container.
 
 ## How to resume
 
@@ -164,5 +199,10 @@ uv run python probe_voice.py --runs 24 --tone "" --fresh-captions   # full path
 probe cannot see this class of bug at all. `--style-only` is the cheap check:
 extraction is the one place the samples are read, so clean descriptors mean
 no foreign fact can reach generation.
+
+Every run reports foreign facts, photo numbering, and wrong slide counts
+together, so any of the three can be measured from the same runs. Prefer
+`--workers 1` at high photo counts; the vision calls fan out per photo and
+the provider drops connections when too many are in flight.
 
 Backend unit tests stay offline and green: `cd backend && uv run pytest`.

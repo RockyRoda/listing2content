@@ -46,8 +46,17 @@ LISTING = {
     "features": "Infinity pool, outdoor kitchen, private beach path",
 }
 PHOTOS = [
-    (Path(r"C:\Windows\Web\Wallpaper\Spotlight\img14.jpg"), "image/jpeg"),
-    (Path(r"C:\Windows\Web\Wallpaper\ThemeA\img20.jpg"), "image/jpeg"),
+    (Path(path), "image/jpeg")
+    for path in [
+        r"C:\Windows\Web\Wallpaper\Spotlight\img14.jpg",
+        r"C:\Windows\Web\Wallpaper\ThemeA\img20.jpg",
+        r"C:\Windows\Web\Wallpaper\ThemeA\img21.jpg",
+        r"C:\Windows\Web\Wallpaper\ThemeA\img22.jpg",
+        r"C:\Windows\Web\Wallpaper\ThemeA\img23.jpg",
+        r"C:\Windows\Web\Wallpaper\ThemeB\img24.jpg",
+        r"C:\Windows\Web\Wallpaper\ThemeB\img25.jpg",
+        r"C:\Windows\Web\Wallpaper\ThemeB\img26.jpg",
+    ]
 ]
 
 # The voice check in scripts/verify-phase4.ps1 leaks where this probe does not.
@@ -79,6 +88,18 @@ FOREIGN_FACTS = [
     r"three bed", r"3 bed", r"two bath", r"2 bath", r"open saturday",
     r"roof is new", r"new roof", r"hammered brass",
 ]
+
+# The photo numbers exist to fill in photo_number; they must never be written
+# into copy the agent would publish. This is what verify-phase4.ps1 fails on.
+NUMBERING = r"(?i)photo\s*#?\s*\d"
+
+# The same mistake in forms the strict pattern misses - "the second photo",
+# "image 3". Counted separately: a strict-only figure understates how often
+# the model reaches for the numbering. Deliberately excludes a bare "Shot 2",
+# which is ordinary script formatting rather than a reference to a photo.
+_INDEX = r"(?:\d+|one|two|three|four|five|six|seven|eight|first|second|third|fourth|last)"
+_SHOT = r"(?:photo|image|slide|frame|pic)"
+NUMBERING_LOOSE = rf"(?i)\b(?:{_SHOT}s?\s*#?\s*{_INDEX}\b|{_INDEX}\s+{_SHOT}\b)"
 
 
 def published_copy(draft) -> str:
@@ -120,7 +141,8 @@ def probe_style(sample: str, runs: int, workers: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=12)
-    parser.add_argument("--photos", type=int, default=2, choices=[1, 2])
+    parser.add_argument("--photos", type=int, default=2,
+                        choices=range(1, len(PHOTOS) + 1))
     parser.add_argument("--sample", default="terse", choices=sorted(SAMPLES))
     parser.add_argument("--tone", default="", help="tone_notes, empty by default")
     parser.add_argument("--workers", type=int, default=3, help="lower this on rate limits")
@@ -177,23 +199,55 @@ def main() -> None:
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         drafts = list(pool.map(one_run, range(args.runs)))
 
-    lengths, leaked_runs = [], 0
+    lengths, leaked_runs, numbered_runs, loose_runs = [], 0, 0, 0
+    # Slides bind to photos by position now, so a wrong slide count silently
+    # misattributes captions. Worth failing loudly here.
+    miscounted = [
+        index
+        for index, draft in enumerate(drafts, start=1)
+        if len(draft.carousel_slides) != len(photos)
+    ]
     for index, draft in enumerate(drafts, start=1):
         copy = published_copy(draft)
         lengths.append(avg_sentence_words(copy))
-        whole = (copy + " " + draft.reel_script).lower()
-        hits = [f for f in FOREIGN_FACTS if re.search(f, whole)]
+        whole = copy + " " + draft.reel_script
+        hits = [f for f in FOREIGN_FACTS if re.search(f, whole.lower())]
+        strict = re.search(NUMBERING, whole)
+        loose = re.search(NUMBERING_LOOSE, whole)
+        problems = []
         if hits:
             leaked_runs += 1
-            print(f"  run {index}: LEAK {', '.join(hits)}")
-            for line in re.split(r"(?<=[.!?])\s+", copy + " " + draft.reel_script):
-                if any(re.search(f, line.lower()) for f in hits):
+            problems.append(f"LEAK {', '.join(hits)}")
+        if strict:
+            numbered_runs += 1
+            problems.append("NUMBERING")
+        elif loose:
+            loose_runs += 1
+            problems.append("NUMBERING (loose)")
+        if problems:
+            matched = sorted(set(m.group(0) for m in re.finditer(NUMBERING_LOOSE, whole)))
+            if matched:
+                problems.append(f"matched {matched}")
+            print(f"  run {index}: {'  '.join(problems)}")
+            for line in re.split(r"[\n]|(?<=[.!?])\s+", whole):
+                if any(re.search(f, line.lower()) for f in hits) or re.search(
+                    NUMBERING_LOOSE, line
+                ):
                     print(f"          {line.strip()[:110]}")
         else:
             print(f"  run {index}: clean  ({lengths[-1]:.1f} words/sentence)")
 
+    numbered_runs += loose_runs
     print(f"\nmean sentence length: {sum(lengths) / len(lengths):.1f} words")
     print(f"foreign facts: {leaked_runs}/{args.runs} runs leaked")
+    print(
+        f"photo numbering in copy: {numbered_runs}/{args.runs} runs"
+        f" ({loose_runs} only in the loose form)"
+    )
+    print(
+        f"wrong slide count: {len(miscounted)}/{args.runs} runs"
+        + (f" (runs {miscounted})" if miscounted else "")
+    )
 
 
 if __name__ == "__main__":

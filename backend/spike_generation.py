@@ -52,7 +52,7 @@ if __name__ == "__main__":
 
     draft = run(paths)
     for index, slide in enumerate(draft.carousel_slides, start=1):
-        print(f"Slide {index} (photo {slide.photo_number}): {slide.caption}")
+        print(f"Slide {index}: {slide.caption}")
     for caption in draft.captions:
         print(f"\n[{caption.label}] {caption.text}")
     print(f"\nReel script:\n{draft.reel_script}")

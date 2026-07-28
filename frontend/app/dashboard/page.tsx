@@ -24,8 +24,8 @@ const TILES = [
     label: "Package",
     title: "Content packages",
     body: "Carousels, caption sets, and Reel scripts, ready to approve.",
-    href: null,
-    cta: "Coming soon",
+    href: "/listings",
+    cta: "Generate",
   },
 ];
 
@@ -45,8 +45,8 @@ export default function DashboardPage() {
             Golden hour, <em>{name}</em>.
           </h1>
           <p>
-            Add a listing and upload photos, then set your voice profile.
-            Content generation arrives in the next release.
+            Add a listing and upload photos, set your voice profile, then
+            generate a content package from any listing.
           </p>
         </section>
 

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { api, apiObjectUrl, apiUpload } from "@/lib/auth";
+import { useRef, useState } from "react";
+import { api, apiUpload } from "@/lib/auth";
+import { useObjectUrls } from "@/lib/useObjectUrls";
 
 export type Photo = {
   id: number;
@@ -26,33 +27,10 @@ export default function PhotoManager({
   photos: Photo[];
   onChanged: () => void;
 }) {
-  const [urls, setUrls] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-
-  // Load each protected photo as an object URL; revoke them on change/unmount.
-  useEffect(() => {
-    let active = true;
-    const made: string[] = [];
-    Promise.all(
-      photos.map(async (p) => [p.id, await apiObjectUrl(p.url)] as const),
-    ).then((pairs) => {
-      if (!active) return;
-      const next: Record<number, string> = {};
-      for (const [id, url] of pairs) {
-        if (url) {
-          next[id] = url;
-          made.push(url);
-        }
-      }
-      setUrls(next);
-    });
-    return () => {
-      active = false;
-      made.forEach(URL.revokeObjectURL);
-    };
-  }, [photos]);
+  const urls = useObjectUrls(photos);
 
   async function upload(files: FileList) {
     setError("");

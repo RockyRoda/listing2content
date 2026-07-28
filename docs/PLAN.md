@@ -35,8 +35,8 @@ or `docs/` yet.
 - LLM calls, two steps:
   1. **Vision captioning** — each listing photo is described by a
      vision-capable model via plain OpenRouter/LiteLLM (not the Cerebras
-     provider, which doesn't serve vision for `gpt-oss-120b`). Specific
-     model TBD at Phase 4 implementation time. Output: text description per
+     provider, which doesn't serve vision for `gpt-oss-120b`). Model chosen
+     in Phase 4: `google/gemini-2.5-flash`. Output: text description per
      photo.
   2. **Content assembly** — via the `cerebras` skill: LiteLLM -> OpenRouter
      -> `openai/gpt-oss-120b` on Cerebras, Structured Outputs (Pydantic),
@@ -117,7 +117,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   upload a voice-profile text file and confirm the extracted text persists;
   confirm an oversized/wrong-type photo upload is rejected
 
-## Phase 4 — AI content generation (core value, ship this early) [ ]
+## Phase 4 — AI content generation (core value, ship this early) [x]
 - DB schema: `content_packages` (id, listing_id, status `draft`/`approved`,
   generated_at, reel_script text), `carousel_slides` (id,
   content_package_id, listing_photo_id, order_index, caption), `captions`
@@ -133,6 +133,10 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
 - Generation endpoint runs both steps and writes a new `content_packages`
   row (status `draft`) plus its slides/captions
 - Minimal UI to trigger generation and display the raw package
+- Decisions made during implementation: one package per listing, so
+  regenerating replaces the previous draft; captioning runs concurrently and
+  is capped at the first 8 photos; a listing with no photos is rejected with
+  400; an LLM failure returns 502 and leaves the existing package untouched
 - Validate: real listing + photos in -> per-photo captions generated ->
   structured, on-brand package out referencing the right photos, displayed
   in the UI

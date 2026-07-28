@@ -12,6 +12,9 @@ from pathlib import Path
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "listing2content.db"
 
 SCHEMA = """
+DROP TABLE IF EXISTS captions;
+DROP TABLE IF EXISTS carousel_slides;
+DROP TABLE IF EXISTS content_packages;
 DROP TABLE IF EXISTS listing_photos;
 DROP TABLE IF EXISTS listings;
 DROP TABLE IF EXISTS voice_profiles;
@@ -60,8 +63,32 @@ CREATE TABLE listing_photos (
 CREATE TABLE voice_profiles (
     user_id INTEGER PRIMARY KEY REFERENCES users(id),
     sample_text TEXT NOT NULL DEFAULT '',
+    style_notes TEXT NOT NULL DEFAULT '',
     tone_notes TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE content_packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER NOT NULL REFERENCES listings(id),
+    status TEXT NOT NULL DEFAULT 'draft',
+    generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reel_script TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE carousel_slides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_package_id INTEGER NOT NULL REFERENCES content_packages(id),
+    listing_photo_id INTEGER REFERENCES listing_photos(id) ON DELETE SET NULL,
+    order_index INTEGER NOT NULL,
+    caption TEXT NOT NULL
+);
+
+CREATE TABLE captions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_package_id INTEGER NOT NULL REFERENCES content_packages(id),
+    label TEXT NOT NULL,
+    text TEXT NOT NULL
 );
 """
 

@@ -5,7 +5,12 @@ import { api, apiUpload } from "@/lib/auth";
 import { useRequireAuth } from "@/lib/useRequireAuth";
 import AppHeader from "@/components/AppHeader";
 
-type Profile = { sample_text: string; tone_notes: string; updated_at: string | null };
+type Profile = {
+  sample_text: string;
+  style_notes: string;
+  tone_notes: string;
+  updated_at: string | null;
+};
 
 export default function SettingsPage() {
   const user = useRequireAuth();
@@ -104,6 +109,17 @@ export default function SettingsPage() {
             <p className="muted">No samples uploaded yet.</p>
           )}
         </section>
+
+        {profile.style_notes && (
+          <section className="current-sample">
+            <h2>Your voice, as we read it</h2>
+            <p className="muted">
+              This is what shapes your copy - your samples themselves are never
+              used, so their details cannot end up in a listing.
+            </p>
+            <pre className="sample-text">{profile.style_notes}</pre>
+          </section>
+        )}
       </main>
     </>
   );

@@ -77,6 +77,9 @@ function DetailBody() {
           <Link href="/listings">Listings</Link> / Edit
         </p>
         <h1>{listing.title}</h1>
+        <p className="hint">
+          <Link href={`/listings/package?id=${id}`}>Content package</Link>
+        </p>
 
         <form onSubmit={save}>
           <ListingFields values={values} onChange={set} />

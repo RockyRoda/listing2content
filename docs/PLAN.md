@@ -141,14 +141,26 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   structured, on-brand package out referencing the right photos, displayed
   in the UI
 
-## Phase 5 — Review / approve / edit pass [ ]
+## Phase 5 — Review / approve / edit pass [x]
 - UI to review each piece of the package (carousel/captions/script),
   edit inline, and save
 - Endpoints to update `carousel_slides.caption` / `captions.text` /
   `content_packages.reel_script`, and flip `content_packages.status` from
   `draft` to `approved`
+- Decisions made during implementation: edits save as one whole-package
+  `PUT /listings/{id}/package` covering all three tables, not per-row
+  PATCHes; approval is its own `POST .../package/approve`, so signing off is
+  never a side effect of a text save; saving an edit returns an approved
+  package to `draft`, since approval covers the exact copy approved, and the
+  UI therefore offers Approve only when nothing is unsaved; every edit UPDATE
+  is scoped to the package id, so a slide/caption id from another package
+  404s and writes nothing
 - Validate: generate a package, edit a caption, save, reload and confirm
-  the edit persisted
+  the edit persisted — done three ways, all green: the offline tests in
+  `backend/tests/test_content_packages.py` (48 across the suite),
+  `scripts/verify-phase5.ps1` (24 checks, one real generation) run against
+  both local uvicorn and the container, and the manual browser pass in
+  `docs/TEST-PHASE5.md` against the container (2026-07-29)
 
 ## Phase 6 — AI chat (data entry + editing) [ ]
 - Chat endpoint that can (a) parse conversational input into listing fields

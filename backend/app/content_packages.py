@@ -1,8 +1,12 @@
-"""Generation and retrieval of a listing's content package.
+"""Generation, review, and approval of a listing's content package.
 
 A listing holds at most one package: generating again replaces the previous
 draft and its slides/captions. The listing is only touched after both LLM
 steps succeed, so a failed generation leaves the existing package intact.
+
+The review pass edits copy in place (PUT) and signs it off separately
+(POST .../approve). Saving edits returns the package to `draft`, because
+approval covers the exact copy that was approved, not the package as a slot.
 """
 
 import logging
@@ -44,6 +48,22 @@ class Package(BaseModel):
     captions: list[Caption]
 
 
+class SlideEdit(BaseModel):
+    id: int
+    caption: str
+
+
+class CaptionEdit(BaseModel):
+    id: int
+    text: str
+
+
+class PackageEdit(BaseModel):
+    reel_script: str
+    slides: list[SlideEdit] = []
+    captions: list[CaptionEdit] = []
+
+
 def _load_package(conn, listing_id: int) -> Package | None:
     """Build a listing's package with its slides and captions, or None."""
     row = conn.execute(
@@ -79,6 +99,49 @@ def _load_package(conn, listing_id: int) -> Package | None:
         ],
         captions=[Caption(**dict(c)) for c in captions],
     )
+
+
+def _package_id(conn, listing_id: int) -> int:
+    """Return the listing's package id, or 404 if none has been generated."""
+    row = conn.execute(
+        "SELECT id FROM content_packages WHERE listing_id = ?", (listing_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No content package yet")
+    return row["id"]
+
+
+def _apply_edits(conn, package_id: int, edit: PackageEdit) -> None:
+    """Write the edited copy over the package's rows and return it to draft.
+
+    Every UPDATE is scoped to the package, so a slide or caption id belonging
+    to some other package matches nothing and is rejected rather than written
+    to. The caller commits, so a rejected edit leaves the package untouched.
+    """
+    conn.execute(
+        "UPDATE content_packages SET reel_script = ?, status = 'draft' WHERE id = ?",
+        (edit.reel_script, package_id),
+    )
+    for slide in edit.slides:
+        changed = conn.execute(
+            "UPDATE carousel_slides SET caption = ?"
+            " WHERE id = ? AND content_package_id = ?",
+            (slide.caption, slide.id, package_id),
+        ).rowcount
+        if changed == 0:
+            raise HTTPException(
+                status_code=404, detail=f"Slide {slide.id} is not part of this package"
+            )
+    for caption in edit.captions:
+        changed = conn.execute(
+            "UPDATE captions SET text = ? WHERE id = ? AND content_package_id = ?",
+            (caption.text, caption.id, package_id),
+        ).rowcount
+        if changed == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Caption {caption.id} is not part of this package",
+            )
 
 
 def _slide_photo_id(position: int, photo_ids: list[int]) -> int | None:
@@ -177,3 +240,32 @@ def get_package(
     if package is None:
         raise HTTPException(status_code=404, detail="No content package yet")
     return package
+
+
+@router.put("/{listing_id}/package", response_model=Package)
+def update_package(
+    listing_id: int,
+    body: PackageEdit,
+    user_id: int = Depends(get_current_user_id),
+) -> Package:
+    """Save the agent's edits to the slides, captions, and Reel script."""
+    with closing(db.connect()) as conn:
+        owned_listing(conn, listing_id, user_id)
+        _apply_edits(conn, _package_id(conn, listing_id), body)
+        conn.commit()
+        return _load_package(conn, listing_id)
+
+
+@router.post("/{listing_id}/package/approve", response_model=Package)
+def approve_package(
+    listing_id: int, user_id: int = Depends(get_current_user_id)
+) -> Package:
+    """Sign the package off as approved, ending the review pass."""
+    with closing(db.connect()) as conn:
+        owned_listing(conn, listing_id, user_id)
+        conn.execute(
+            "UPDATE content_packages SET status = 'approved' WHERE id = ?",
+            (_package_id(conn, listing_id),),
+        )
+        conn.commit()
+        return _load_package(conn, listing_id)

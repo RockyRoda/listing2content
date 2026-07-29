@@ -1,29 +1,12 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/auth";
 import { useRequireAuth } from "@/lib/useRequireAuth";
-import { useObjectUrls } from "@/lib/useObjectUrls";
 import AppHeader from "@/components/AppHeader";
-
-type Slide = {
-  id: number;
-  listing_photo_id: number | null;
-  order_index: number;
-  caption: string;
-  photo_url: string | null;
-};
-type Caption = { id: number; label: string; text: string };
-type Package = {
-  id: number;
-  status: string;
-  generated_at: string;
-  reel_script: string;
-  slides: Slide[];
-  captions: Caption[];
-};
+import PackageEditor, { type Package } from "@/components/PackageEditor";
 
 const GENERATE_ERRORS: Record<number, string> = {
   400: "Add at least one photo to this listing first.",
@@ -57,16 +40,6 @@ function PackageBody() {
     if (user && id) load();
   }, [user, id, load]);
 
-  // Slides carry their own protected photo URL; key the blobs by slide id.
-  const slideImages = useMemo(
-    () =>
-      (pkg?.slides ?? [])
-        .filter((s) => s.photo_url)
-        .map((s) => ({ id: s.id, url: s.photo_url as string })),
-    [pkg],
-  );
-  const urls = useObjectUrls(slideImages);
-
   async function generate() {
     setBusy(true);
     setStatus("Reading the photos and writing the package...");
@@ -74,7 +47,7 @@ function PackageBody() {
     setBusy(false);
     if (res.ok) {
       setPkg(await res.json());
-      setStatus("Draft ready.");
+      setStatus("Draft ready. Edit anything below, then approve.");
     } else {
       setStatus(GENERATE_ERRORS[res.status] ?? "Could not generate the package.");
     }
@@ -107,7 +80,7 @@ function PackageBody() {
         <h1>{title}</h1>
 
         <div className="actions">
-          <button className="btn btn--inline" onClick={generate} disabled={busy}>
+          <button className="btn btn--ghost btn--inline" onClick={generate} disabled={busy}>
             {busy ? "Generating..." : pkg ? "Regenerate" : "Generate package"}
           </button>
           <span className="muted" role="status">
@@ -121,55 +94,9 @@ function PackageBody() {
             drafts a carousel, caption set, and Reel script in your voice.
           </p>
         ) : (
-          <>
-            <section className="package-section">
-              <div className="package-section__head">
-                <h2>Carousel</h2>
-                <span className="muted">
-                  {pkg.slides.length} slide{pkg.slides.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <div className="slide-grid">
-                {pkg.slides.map((slide, i) => (
-                  <figure className="slide" key={slide.id}>
-                    <div className="photo">
-                      {urls[slide.id] ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={urls[slide.id]} alt={`Slide ${i + 1}`} />
-                      ) : (
-                        <div className="photo__loading" />
-                      )}
-                    </div>
-                    <figcaption>
-                      <span className="slide__number">{i + 1}</span> {slide.caption}
-                    </figcaption>
-                  </figure>
-                ))}
-              </div>
-            </section>
-
-            <section className="package-section">
-              <div className="package-section__head">
-                <h2>Captions</h2>
-              </div>
-              <ul className="caption-list">
-                {pkg.captions.map((caption) => (
-                  <li className="caption-card" key={caption.id}>
-                    <p className="eyebrow">{caption.label}</p>
-                    <p>{caption.text}</p>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className="package-section">
-              <div className="package-section__head">
-                <h2>Reel script</h2>
-                <span className="muted">Draft generated {pkg.generated_at}</span>
-              </div>
-              <div className="sample-text">{pkg.reel_script}</div>
-            </section>
-          </>
+          // Keyed on the package: regenerating replaces the draft, so the
+          // editor remounts rather than carrying edits over to new copy.
+          <PackageEditor key={pkg.id} listingId={id as string} initial={pkg} />
         )}
       </main>
     </>

@@ -594,6 +594,10 @@ a:hover {
   margin: 0;
 }
 .slide figcaption {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.5rem;
   font-size: 0.9rem;
   margin-top: 0.75rem;
 }
@@ -618,7 +622,37 @@ a:hover {
   margin: 0.4rem 0 0;
 }
 .caption-card .eyebrow {
-  margin: 0;
+  display: block;
+  margin: 0 0 0.5rem;
+}
+
+/* --- Review pass: edit in place, then approve --- */
+.review-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 2rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--line);
+}
+.badge {
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  color: var(--mist);
+}
+.badge--approved {
+  color: var(--brass);
+  border-color: rgba(201, 161, 90, 0.35);
+  background: rgba(201, 161, 90, 0.1);
+}
+.slide textarea,
+.caption-card textarea {
+  font-size: 0.9rem;
 }
 
 @media (prefers-reduced-motion: reduce) {

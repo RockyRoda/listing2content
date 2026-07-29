@@ -14,13 +14,39 @@ function Check($name, $cond) {
   else       { Write-Host "  FAIL  $name" -ForegroundColor Red;   $script:fail++ }
 }
 
-# Returns the HTTP status of a request that is expected to fail.
-function Get-FailCode($method, $uri, $headers, $body) {
+function Write-Total($note) {
+  Write-Host ""
+  Write-Host "  $pass passed, $fail failed$note" -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Red" })
+}
+
+# Every request goes through here so an unexpected HTTP failure is printed
+# rather than silently leaving $null behind for a later check to misread.
+function Invoke-Api($method, $path, $body, $headers = $null) {
+  if ($null -eq $headers) { $headers = $script:H }
   try {
-    Invoke-RestMethod -Method $method -Uri $uri -Headers $headers -Body $body `
-      -ContentType "application/json" | Out-Null
+    return Invoke-RestMethod -Method $method -Uri "$base$path" -Headers $headers `
+      -Body $body -ContentType "application/json" -ErrorAction Stop
+  } catch {
+    Write-Host "        $method $path -> HTTP $($_.Exception.Response.StatusCode.value__)" -ForegroundColor DarkYellow
+    return $null
+  }
+}
+
+# Returns the HTTP status of a request that is expected to fail.
+function Get-FailCode($method, $path, $headers, $body) {
+  try {
+    Invoke-RestMethod -Method $method -Uri "$base$path" -Headers $headers -Body $body `
+      -ContentType "application/json" -ErrorAction Stop | Out-Null
     return 200
   } catch { return $_.Exception.Response.StatusCode.value__ }
+}
+
+# Compares one field across two row sets. Fails when either side is empty: an
+# empty-to-empty match is what let a missing package read as a pass.
+function Test-SameField($actual, $expected, $field) {
+  $left  = @($actual   | ForEach-Object { $_.$field }) -join ","
+  $right = @($expected | ForEach-Object { $_.$field }) -join ","
+  return ($left.Length -gt 0) -and ($left -eq $right)
 }
 
 # Wait for the server to be up.
@@ -40,19 +66,32 @@ if ($photos.Count -lt 2) {
 
 # --- An agent with a listing and photos ---
 $email = "phase5+$(Get-Random)@studio.com"
-$creds = @{ email = $email; password = "secret123" } | ConvertTo-Json
-$auth  = Invoke-RestMethod -Method Post -Uri "$base/api/auth/signup" -Body $creds -ContentType "application/json"
+$auth  = Invoke-Api "Post" "/api/auth/signup" (@{ email = $email; password = "secret123" } | ConvertTo-Json) @{}
 $H     = @{ Authorization = "Bearer $($auth.token)" }
 
 function New-ListingWithPhotos($title) {
   $body = @{ title = $title; location = "Wailea, Maui"; price = 8950000; beds = 4; baths = 4.5;
              features = "Infinity pool, outdoor kitchen, private beach path" } | ConvertTo-Json
-  $l = Invoke-RestMethod -Method Post -Uri "$base/api/listings" -Body $body -ContentType "application/json" -Headers $H
+  $l = Invoke-Api "Post" "/api/listings" $body
   $curlArgs = @("-s", "-X", "POST", "$base/api/listings/$($l.id)/photos",
                 "-H", "Authorization: Bearer $($auth.token)")
   foreach ($p in $photos) { $curlArgs += @("-F", "files=@$($p.FullName);type=image/jpeg") }
   & curl.exe @curlArgs | Out-Null
   return $l
+}
+
+# Generation is Phase 4, and it can fail for reasons this test is not about (a
+# provider hiccup, a key that never reached the container). Report that plainly
+# and stop, rather than letting every later check compare nulls.
+function New-Package($listingId, $what) {
+  Write-Host "  ....  $what (real LLM calls, please wait)" -ForegroundColor DarkGray
+  $p = Invoke-Api "Post" "/api/listings/$listingId/package" $null
+  if ($null -eq $p) {
+    Write-Host "  STOP  $what failed - that is generation (Phase 4), not the review pass." -ForegroundColor Yellow
+    Write-Host "        A 502 means the LLM call itself failed: confirm OPENROUTER_API_KEY" -ForegroundColor Yellow
+    Write-Host "        reached the app, check the backend log for the exception, and retry." -ForegroundColor Yellow
+  }
+  return $p
 }
 
 # An edit body echoing the package back with every piece of copy replaced.
@@ -69,77 +108,78 @@ $listing = New-ListingWithPhotos "Oceanfront Villa Kai"
 # --- Nothing to review until a package exists ---
 $noPkg = @{ reel_script = "No package to edit."; slides = @(); captions = @() } | ConvertTo-Json
 Check "edit before generating -> 404" (
-  (Get-FailCode "Put" "$base/api/listings/$($listing.id)/package" $H $noPkg) -eq 404)
+  (Get-FailCode "Put" "/api/listings/$($listing.id)/package" $H $noPkg) -eq 404)
 Check "approve before generating -> 404" (
-  (Get-FailCode "Post" "$base/api/listings/$($listing.id)/package/approve" $H $null) -eq 404)
+  (Get-FailCode "Post" "/api/listings/$($listing.id)/package/approve" $H $null) -eq 404)
 
-# --- Generate the draft to review (real LLM calls) ---
-Write-Host "  ....  generating the draft to review (real LLM calls, please wait)" -ForegroundColor DarkGray
-$pkg = Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($listing.id)/package" -Headers $H
+# --- Generate the draft to review ---
+$pkg = New-Package $listing.id "generating the draft to review"
+if ($null -eq $pkg) { Write-Total " (stopped before the review checks)"; return }
 Check "generated package starts as a draft" ($pkg.status -eq "draft")
 
 # --- Edit every piece of copy, save, reload ---
-$edited = Invoke-RestMethod -Method Put -Uri "$base/api/listings/$($listing.id)/package" `
-  -Body (New-EditBody $pkg "An edited Reel script.") -ContentType "application/json" -Headers $H
-Check "edit returns the saved package"     ($edited.reel_script -eq "An edited Reel script.")
-Check "slide captions took the edit"       (($edited.slides | Where-Object { $_.caption -notlike "Edited slide*" }).Count -eq 0)
-Check "caption set took the edit"          (($edited.captions | Where-Object { $_.text -notlike "Edited caption*" }).Count -eq 0)
+$edited = Invoke-Api "Put" "/api/listings/$($listing.id)/package" (New-EditBody $pkg "An edited Reel script.")
+Check "edit returns the saved package" ($edited.reel_script -eq "An edited Reel script.")
+Check "slide captions took the edit" (
+  ($edited.slides.Count -gt 0) -and
+  (@($edited.slides | Where-Object { $_.caption -notlike "Edited slide*" }).Count -eq 0))
+Check "caption set took the edit" (
+  ($edited.captions.Count -gt 0) -and
+  (@($edited.captions | Where-Object { $_.text -notlike "Edited caption*" }).Count -eq 0))
 
-$reloaded = Invoke-RestMethod -Uri "$base/api/listings/$($listing.id)/package" -Headers $H
-Check "edits survive a reload"             ($reloaded.reel_script -eq "An edited Reel script.")
-Check "editing keeps the same package"     ($reloaded.id -eq $pkg.id)
-Check "caption labels are left alone"      (
-  (@($reloaded.captions | ForEach-Object { $_.label }) -join ",") -eq
-  (@($pkg.captions      | ForEach-Object { $_.label }) -join ","))
-Check "slides keep their photo bindings"   (
-  (@($reloaded.slides | ForEach-Object { $_.listing_photo_id }) -join ",") -eq
-  (@($pkg.slides      | ForEach-Object { $_.listing_photo_id }) -join ","))
-Check "slides keep their order"            (
-  (@($reloaded.slides | ForEach-Object { $_.order_index }) -join ",") -eq "0,1")
+$reloaded = Invoke-Api "Get" "/api/listings/$($listing.id)/package" $null
+Check "edits survive a reload"           ($reloaded.reel_script -eq "An edited Reel script.")
+Check "editing keeps the same package"   (($null -ne $reloaded.id) -and ($reloaded.id -eq $pkg.id))
+Check "caption labels are left alone"    (Test-SameField $reloaded.captions $pkg.captions "label")
+Check "slides keep their photo bindings" (Test-SameField $reloaded.slides $pkg.slides "listing_photo_id")
+
+# The model decides the slide count, so assert the indexes run 0..n-1 rather
+# than hard-coding one per photo.
+$orders = @($reloaded.slides | ForEach-Object { $_.order_index })
+Check "slides keep their order (0..$($orders.Count - 1))" (
+  ($orders.Count -gt 0) -and (($orders -join ",") -eq ((0..($orders.Count - 1)) -join ",")))
 
 # --- Approve, then confirm an edit sends it back to draft ---
-$approved = Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($listing.id)/package/approve" -Headers $H
-Check "approve flips the status"           ($approved.status -eq "approved")
-Check "approval survives a reload"         (
-  (Invoke-RestMethod -Uri "$base/api/listings/$($listing.id)/package" -Headers $H).status -eq "approved")
+$approved = Invoke-Api "Post" "/api/listings/$($listing.id)/package/approve" $null
+Check "approve flips the status" ($approved.status -eq "approved")
+Check "approval survives a reload" (
+  (Invoke-Api "Get" "/api/listings/$($listing.id)/package" $null).status -eq "approved")
 
-$reEdited = Invoke-RestMethod -Method Put -Uri "$base/api/listings/$($listing.id)/package" `
-  -Body (New-EditBody $approved "A second pass on the script.") -ContentType "application/json" -Headers $H
+$reEdited = Invoke-Api "Put" "/api/listings/$($listing.id)/package" (New-EditBody $approved "A second pass on the script.")
 Check "editing an approved package returns it to draft" ($reEdited.status -eq "draft")
 
 # --- Regenerating an approved package hands back a fresh draft ---
-Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($listing.id)/package/approve" -Headers $H | Out-Null
-Write-Host "  ....  regenerating over the approved package" -ForegroundColor DarkGray
-$regen = Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($listing.id)/package" -Headers $H
+Invoke-Api "Post" "/api/listings/$($listing.id)/package/approve" $null | Out-Null
+$regen = New-Package $listing.id "regenerating over the approved package"
+if ($null -eq $regen) { Write-Total " (stopped before the regeneration checks)"; return }
 Check "regenerate replaces approved copy with a draft" ($regen.status -eq "draft")
-Check "regenerate produces a new package"  ($regen.id -ne $pkg.id)
+Check "regenerate produces a new package" (($null -ne $regen.id) -and ($regen.id -ne $pkg.id))
 
 # --- An id from another package is not writable through this one ---
 $second = New-ListingWithPhotos "Second listing"
-Write-Host "  ....  generating a second package for the cross-package check" -ForegroundColor DarkGray
-$other = Invoke-RestMethod -Method Post -Uri "$base/api/listings/$($second.id)/package" -Headers $H
+$other  = New-Package $second.id "generating a second package for the cross-package check"
+if ($null -eq $other) { Write-Total " (stopped before the cross-package checks)"; return }
 
 $crossBody = (New-EditBody $regen "Should not be saved." | ConvertFrom-Json)
 $crossBody.slides[0].id = $other.slides[0].id
 Check "editing another package's slide -> 404" (
-  (Get-FailCode "Put" "$base/api/listings/$($listing.id)/package" $H ($crossBody | ConvertTo-Json -Depth 5)) -eq 404)
+  (Get-FailCode "Put" "/api/listings/$($listing.id)/package" $H ($crossBody | ConvertTo-Json -Depth 5)) -eq 404)
 Check "the rejected edit changed nothing" (
-  (Invoke-RestMethod -Uri "$base/api/listings/$($listing.id)/package" -Headers $H).reel_script -eq $regen.reel_script)
+  (Invoke-Api "Get" "/api/listings/$($listing.id)/package" $null).reel_script -eq $regen.reel_script)
 Check "the other package is untouched too" (
-  (Invoke-RestMethod -Uri "$base/api/listings/$($second.id)/package" -Headers $H).slides[0].caption -eq $other.slides[0].caption)
+  (Invoke-Api "Get" "/api/listings/$($second.id)/package" $null).slides[0].caption -eq $other.slides[0].caption)
 
 # --- Owner scoping ---
-$intruder = Invoke-RestMethod -Method Post -Uri "$base/api/auth/signup" -ContentType "application/json" `
-  -Body (@{ email = "intruder+$(Get-Random)@studio.com"; password = "secret123" } | ConvertTo-Json)
+$intruder = Invoke-Api "Post" "/api/auth/signup" (
+  @{ email = "intruder+$(Get-Random)@studio.com"; password = "secret123" } | ConvertTo-Json) @{}
 $iH = @{ Authorization = "Bearer $($intruder.token)" }
 $body = New-EditBody $regen "Not yours."
-Check "another agent's edit -> 404"    ((Get-FailCode "Put"  "$base/api/listings/$($listing.id)/package" $iH $body) -eq 404)
-Check "another agent's approve -> 404" ((Get-FailCode "Post" "$base/api/listings/$($listing.id)/package/approve" $iH $null) -eq 404)
-Check "edit with no token -> 401"      ((Get-FailCode "Put"  "$base/api/listings/$($listing.id)/package" @{} $body) -eq 401)
-Check "approve with no token -> 401"   ((Get-FailCode "Post" "$base/api/listings/$($listing.id)/package/approve" @{} $null) -eq 401)
+Check "another agent's edit -> 404"    ((Get-FailCode "Put"  "/api/listings/$($listing.id)/package" $iH $body) -eq 404)
+Check "another agent's approve -> 404" ((Get-FailCode "Post" "/api/listings/$($listing.id)/package/approve" $iH $null) -eq 404)
+Check "edit with no token -> 401"      ((Get-FailCode "Put"  "/api/listings/$($listing.id)/package" @{} $body) -eq 401)
+Check "approve with no token -> 401"   ((Get-FailCode "Post" "/api/listings/$($listing.id)/package/approve" @{} $null) -eq 401)
 
 Write-Host ""
 Write-Host "  Review the package in the UI: $base/listings/package/?id=$($listing.id)" -ForegroundColor DarkGray
 Write-Host "  Sign in as $email / secret123, edit a caption, save, then reload." -ForegroundColor DarkGray
-Write-Host ""
-Write-Host "  $pass passed, $fail failed" -ForegroundColor $(if ($fail -eq 0) { "Green" } else { "Red" })
+Write-Total ""

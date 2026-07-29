@@ -62,6 +62,27 @@ printing a package URL and sign-in credentials — use those for step 3.
 Pass `-PhotoDir C:\path\with\jpgs` if the default Windows wallpaper folder has
 no `.jpg` files.
 
+### If generation fails
+
+Generation is Phase 4 and it does fail occasionally — a provider hiccup, a rate
+limit, a key that never reached the container. The script stops as soon as it
+sees that, printing the HTTP status:
+
+```
+        Post /api/listings/3/package -> HTTP 502
+  STOP  generating the draft to review failed - that is generation (Phase 4),
+        not the review pass.
+```
+
+A 502 means the LLM call itself failed; the backend log holds the exception.
+Retry, and if it repeats, confirm `OPENROUTER_API_KEY` reached the app (for
+Docker, `docker exec listing2content printenv OPENROUTER_API_KEY`).
+
+The script used to press on after such a failure, which produced six
+misleading Phase 5 FAILs *and* six false passes, because comparisons like
+`$reloaded.id -eq $pkg.id` are true when both sides are `$null`. Every
+comparison now requires real data on both sides, so an empty result fails.
+
 ---
 
 ## 3. Manual UI pass — the part automation doesn't cover

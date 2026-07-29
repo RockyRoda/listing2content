@@ -169,7 +169,7 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
 - Validate: use chat to fill in a listing field and to request an edit to a
   generated caption; confirm both persist
 
-## Phase 7 — Docker packaging & scripts [ ]
+## Phase 7 — Docker packaging & scripts [x]
 - Finalize single-container Docker build (backend serving built frontend,
   SQLite inside container)
 - `OPENROUTER_API_KEY` reaches the container via `docker run --env-file
@@ -178,9 +178,32 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   `docker-compose.yml`, and `.env` is never copied into the image
 - Finish `scripts/start-mac.sh`, `stop-mac.sh`, `start-linux.sh`,
   `stop-linux.sh`, `start-windows.ps1`, `stop-windows.ps1`
+- Decisions made during implementation:
+  - A clean checkout has no `.env` (it is gitignored), so `.env.example` is
+    committed and the start scripts stop with "copy .env.example to .env"
+    rather than surfacing docker's own error
+  - `start` replaces any existing container instead of failing on the name
+    conflict — nothing to preserve, per decision 13 — and then polls
+    `/health`, so it only reports success once the app actually answers
+  - Readiness is probed on `http://127.0.0.1:8000`, not `localhost`: Windows
+    resolves localhost to `::1` first and Docker Desktop's `[::]:8000` publish
+    does not forward, so an IPv6-first probe stalls on every attempt and never
+    sees the healthy app. The URL shown to the user stays `localhost`
+  - `start-windows.ps1` no longer sets `$ErrorActionPreference = "Stop"`:
+    docker writes build progress to stderr, which PowerShell 5.1 wraps as a
+    `NativeCommandError`, aborting the script after the build and before
+    `docker run`. Exit codes are checked explicitly instead
+  - The mac and linux scripts were byte-identical, so the logic lives once in
+    `start-unix.sh` / `stop-unix.sh` and the four required entry points
+    delegate to it; all six are now executable (mode 755)
+  - `HEALTHCHECK` added to the Dockerfile using stdlib `urllib`, so the image
+    needs no curl and `main.py`'s claim that `/health` backs a container
+    healthcheck is finally true
 - Validate: on a clean checkout, the start script brings up the app at
   `http://localhost:8000` with a fresh DB, and a generation call succeeds
-  (proving the API key made it into the container)
+  (proving the API key made it into the container) — `scripts/verify-phase7.ps1`
+  drives the real scripts end to end (27 checks, one real generation); the
+  Unix path was exercised via Git Bash
 
 ## Phase 8 — Testing & hardening [ ]
 - Unit tests: auth, listing CRUD, structured-output parsing

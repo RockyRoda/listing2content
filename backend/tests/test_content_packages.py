@@ -155,6 +155,127 @@ def test_package_requires_auth(client, auth_headers, fake_llm):
     assert client.post(f"/api/listings/{lid}/package").status_code == 401
 
 
+def _edit_body(package, reel="An edited script."):
+    """A PUT body echoing the package back with every piece of copy changed."""
+    return {
+        "reel_script": reel,
+        "slides": [
+            {"id": s["id"], "caption": f"Edited slide {i}"}
+            for i, s in enumerate(package["slides"])
+        ],
+        "captions": [
+            {"id": c["id"], "text": "Edited caption"} for c in package["captions"]
+        ],
+    }
+
+
+def test_edits_persist_across_a_reload(client, auth_headers, fake_llm):
+    lid = _listing_with_photos(client, auth_headers)
+    pkg = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()
+
+    saved = client.put(
+        f"/api/listings/{lid}/package", json=_edit_body(pkg), headers=auth_headers
+    )
+    assert saved.status_code == 200
+    assert saved.json()["reel_script"] == "An edited script."
+    assert [s["caption"] for s in saved.json()["slides"]] == [
+        "Edited slide 0",
+        "Edited slide 1",
+    ]
+    assert client.get(f"/api/listings/{lid}/package", headers=auth_headers).json() == saved.json()
+
+
+def test_editing_keeps_the_slides_photo_mapping(client, auth_headers, fake_llm):
+    """Edits touch caption text only - order and photo bindings are untouched."""
+    lid = _listing_with_photos(client, auth_headers)
+    pkg = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()
+    edited = client.put(
+        f"/api/listings/{lid}/package", json=_edit_body(pkg), headers=auth_headers
+    ).json()
+    assert [s["listing_photo_id"] for s in edited["slides"]] == [
+        s["listing_photo_id"] for s in pkg["slides"]
+    ]
+    assert [s["order_index"] for s in edited["slides"]] == [0, 1]
+
+
+def test_approve_flips_the_status(client, auth_headers, fake_llm):
+    lid = _listing_with_photos(client, auth_headers)
+    client.post(f"/api/listings/{lid}/package", headers=auth_headers)
+    approved = client.post(f"/api/listings/{lid}/package/approve", headers=auth_headers)
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert client.get(f"/api/listings/{lid}/package", headers=auth_headers).json()["status"] == "approved"
+
+
+def test_editing_an_approved_package_returns_it_to_draft(
+    client, auth_headers, fake_llm
+):
+    lid = _listing_with_photos(client, auth_headers)
+    pkg = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()
+    client.post(f"/api/listings/{lid}/package/approve", headers=auth_headers)
+    edited = client.put(
+        f"/api/listings/{lid}/package", json=_edit_body(pkg), headers=auth_headers
+    ).json()
+    assert edited["status"] == "draft"
+
+
+def test_editing_another_packages_row_is_rejected(client, auth_headers, fake_llm):
+    """An id from a different package must not be writable through this one."""
+    first = _listing_with_photos(client, auth_headers)
+    second = _listing_with_photos(client, auth_headers)
+    other = client.post(f"/api/listings/{second}/package", headers=auth_headers).json()
+    mine = client.post(f"/api/listings/{first}/package", headers=auth_headers).json()
+
+    body = _edit_body(mine)
+    body["slides"][0]["id"] = other["slides"][0]["id"]
+    assert client.put(
+        f"/api/listings/{first}/package", json=body, headers=auth_headers
+    ).status_code == 404
+
+    # The rejected save left both packages exactly as they were.
+    assert client.get(f"/api/listings/{first}/package", headers=auth_headers).json() == mine
+    assert client.get(f"/api/listings/{second}/package", headers=auth_headers).json() == other
+
+
+def test_editing_before_generating_is_404(client, auth_headers):
+    lid = _listing_with_photos(client, auth_headers)
+    body = {"reel_script": "No package to edit.", "slides": [], "captions": []}
+    assert client.put(
+        f"/api/listings/{lid}/package", json=body, headers=auth_headers
+    ).status_code == 404
+    assert client.post(
+        f"/api/listings/{lid}/package/approve", headers=auth_headers
+    ).status_code == 404
+
+
+def test_edit_and_approve_are_owner_scoped(client, auth_headers, fake_llm):
+    lid = _listing_with_photos(client, auth_headers)
+    pkg = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()
+    token = client.post(
+        "/api/auth/signup", json={"email": "intruder@b.com", "password": "pw"}
+    ).json()["token"]
+    other = {"Authorization": f"Bearer {token}"}
+
+    assert client.put(
+        f"/api/listings/{lid}/package", json=_edit_body(pkg), headers=other
+    ).status_code == 404
+    assert client.post(
+        f"/api/listings/{lid}/package/approve", headers=other
+    ).status_code == 404
+    assert client.put(f"/api/listings/{lid}/package", json=_edit_body(pkg)).status_code == 401
+    assert client.post(f"/api/listings/{lid}/package/approve").status_code == 401
+
+
+def test_regenerating_replaces_an_approved_package_with_a_draft(
+    client, auth_headers, fake_llm
+):
+    lid = _listing_with_photos(client, auth_headers)
+    client.post(f"/api/listings/{lid}/package", headers=auth_headers)
+    client.post(f"/api/listings/{lid}/package/approve", headers=auth_headers)
+    regenerated = client.post(f"/api/listings/{lid}/package", headers=auth_headers).json()
+    assert regenerated["status"] == "draft"
+
+
 def test_deleting_a_used_photo_clears_the_slide_reference(
     client, auth_headers, fake_llm
 ):

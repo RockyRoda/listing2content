@@ -25,4 +25,10 @@ COPY backend/app ./app
 COPY --from=frontend /app/frontend/out /app/frontend/out
 
 EXPOSE 8000
+
+# Reports healthy once FastAPI answers /health. Uses stdlib urllib so the image
+# needs no curl. start-period covers uv's startup and the schema rebuild.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
+  CMD ["python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+
 CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

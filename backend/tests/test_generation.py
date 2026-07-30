@@ -224,21 +224,26 @@ def test_voice_brief_falls_back_when_no_profile_is_set(fake_completion):
     assert "has not provided writing samples" in fake.user_content()
 
 
-def test_assembly_prompt_never_receives_raw_writing_samples(fake_completion):
-    """The contamination guard from docs/VOICE-CONTAMINATION.md.
+def test_voice_material_in_the_prompt_is_only_what_was_passed(fake_completion):
+    """assemble_package can only relay the voice arguments it is given.
 
-    Only extract_style's descriptors may reach assembly. Raw samples advertise
-    the agent's other properties, and their facts leaked into new listings when
-    the prompt included them. Cheap check for what the smoke test pays to catch.
+    The contamination guard from docs/VOICE-CONTAMINATION.md cannot be tested
+    here: this function never receives the agent's raw samples, so asserting
+    their facts are absent would pass no matter what the code did. The real
+    invariant - that the endpoint passes style_notes and not sample_text - is
+    enforced by test_voice_profiles.test_generation_never_sees_the_raw_samples
+    and, over the whole flow with real prompt building, by
+    test_integration_flow.test_agent_walks_the_whole_product.
     """
     fake = fake_completion()
-    generation.assemble_package(
-        LISTING, ["A lanai."], "Sentence rhythm: short declaratives.", "Warm."
-    )
-    whole_prompt = fake.system_content() + fake.user_content()
+    generation.assemble_package(LISTING, ["A lanai."], "Rhythm: clipped.", "Warm.")
+    voice_section = fake.user_content().split("AGENT VOICE", 1)[1]
 
-    for fact in ("Sycamore", "furnace", "Open Saturday", "Corner lot"):
-        assert fact not in whole_prompt
+    assert "Rhythm: clipped." in voice_section
+    assert "Warm." in voice_section
+    # Nothing else from the call leaks into the voice section.
+    assert "Wailea" not in voice_section
+    assert "A lanai." not in voice_section
 
 
 # --- Model and provider routing (per docs/PLAN.md) ---

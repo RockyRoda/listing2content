@@ -23,6 +23,12 @@ env/
 htmlcov/
 uv.lock.bak
 
+# --- Playwright (browser tests) ---
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # --- Node / Next.js ---
 node_modules/
 .next/

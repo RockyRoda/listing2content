@@ -90,10 +90,13 @@ comparison now requires real data on both sides, so an empty result fails.
 The steps above prove the API. This proves the page. Sign in with the
 credentials `verify-phase5.ps1` printed and open the package URL it printed.
 
+Most of this is now automated as well — see `frontend/e2e/package-review.spec.ts`
+(`cd frontend && npm run e2e`), added in Phase 8.
+
 | Do this | Expect |
 | --- | --- |
-| Look at the review bar | A grey **Draft** badge, an enabled **Save edits**, a disabled **Approve** |
-| Type into a slide caption | `Unsaved edits - save before approving.` appears; **Approve** disables |
+| Look at the review bar | A grey **Draft** badge, a **disabled Save edits** (nothing typed yet, so nothing to save), and an **enabled Approve** (nothing unsaved is in the way) |
+| Type into a slide caption | `Unsaved edits - save before approving.` appears; **Save edits** enables and **Approve** disables |
 | Watch the photos while typing | They stay put — no flicker back to the loading placeholder |
 | Click **Save edits** | `Saved.`; **Save edits** disables again; badge still **Draft** |
 | **Reload the page (F5)** | The edited text is still there — *this is the plan's stated validation* |

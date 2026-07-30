@@ -237,6 +237,21 @@ def test_editing_another_packages_row_is_rejected(client, auth_headers, fake_llm
     assert client.get(f"/api/listings/{second}/package", headers=auth_headers).json() == other
 
 
+def test_editing_another_packages_caption_is_rejected(client, auth_headers, fake_llm):
+    """The caption branch of the scoping guard, alongside the slide one above."""
+    first = _listing_with_photos(client, auth_headers)
+    second = _listing_with_photos(client, auth_headers)
+    other = client.post(f"/api/listings/{second}/package", headers=auth_headers).json()
+    mine = client.post(f"/api/listings/{first}/package", headers=auth_headers).json()
+
+    body = _edit_body(mine)
+    body["captions"][0]["id"] = other["captions"][0]["id"]
+    assert client.put(
+        f"/api/listings/{first}/package", json=body, headers=auth_headers
+    ).status_code == 404
+    assert client.get(f"/api/listings/{first}/package", headers=auth_headers).json() == mine
+
+
 def test_editing_before_generating_is_404(client, auth_headers):
     lid = _listing_with_photos(client, auth_headers)
     body = {"reel_script": "No package to edit.", "slides": [], "captions": []}

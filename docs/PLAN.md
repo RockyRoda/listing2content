@@ -8,10 +8,23 @@ lifestyle framing, ready for a quick approve/edit pass. An AI chat lets the
 agent both feed in listing data conversationally and edit/save the generated
 package.
 
-## Current repo state
-Greenfield. Only `CLAUDE.md`, `README.md`, `LICENSE`, `.gitignore`, `.env`
-(with `OPENROUTER_API_KEY`) exist. No `backend/`, `frontend/`, `scripts/`,
-or `docs/` yet.
+## Current state — v1 complete (2026-07-30)
+Phases 0–5 and 7–9 are done. Phase 6 (AI chat) was deferred, as decision 4
+scoped it to be.
+
+- `backend/` — FastAPI on `uv`; 73 tests, 100% statement coverage of `app/`
+- `frontend/` — Next.js static export served by FastAPI; 7 Playwright specs
+- `scripts/` — start/stop for mac/linux/windows, `seed-demo.ps1`, and
+  `verify-phase2/4/5/7/8.ps1`
+- `docs/` — this plan, `TESTING.md`, the per-phase test guides, and
+  `VOICE-CONTAMINATION.md`
+- One Docker image builds and serves the whole app; `OPENROUTER_API_KEY`
+  arrives at run time via `--env-file`
+
+Known limits carried out of v1: all data is wiped on restart (decision 13),
+there is no CI, the mac/linux scripts have never run on real macOS or Linux,
+and AI output is checked structurally rather than for quality. See
+`docs/TESTING.md`.
 
 ## Target architecture (per CLAUDE.md + decisions below)
 - `backend/` — FastAPI, managed with `uv`
@@ -40,7 +53,9 @@ or `docs/` yet.
      photo.
   2. **Content assembly** — via the `cerebras` skill: LiteLLM -> OpenRouter
      -> `openai/gpt-oss-120b` on Cerebras, Structured Outputs (Pydantic),
-     fed the listing specs + voice profile + per-photo captions from step 1
+     fed the listing specs + the per-photo captions from step 1 + the agent's
+     distilled `style_notes` and `tone_notes` (never their raw writing
+     samples — see Phase 4)
 - Content package schema: `content_packages` (id, listing_id, status
   `draft`/`approved`, generated_at, reel_script text), `carousel_slides`
   (id, content_package_id, listing_photo_id, order_index, caption),
@@ -50,13 +65,15 @@ or `docs/` yet.
 - `scripts/start-*.{sh,ps1}` / `stop-*.{sh,ps1}` for mac/linux/windows
 - All planning docs live in `docs/`
 
-## Timeline note
-README states target completion 2026-07-28 (5 days from today, 2026-07-23).
-That's tight — the phase order below is chosen so the app is
-demoable end-to-end early (Phase 4), with chat-based editing (Phase 6)
-explicitly scoped as a stretch goal to add only after the core
-auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
-0–5, 7–8) is solid.
+## Outcome
+Planned on 2026-07-23 against a 2026-07-28 target; v1 landed 2026-07-30, two
+days over. The phase order held up: the app was demoable end-to-end at Phase 4,
+and chat (Phase 6) was the only thing the schedule cost, which is what
+scoping it as a stretch goal was for.
+
+The phase bodies below are left as written during implementation — each records
+the decisions taken and the problems found at the time, which is more useful
+than a tidied summary.
 
 ---
 
@@ -128,8 +145,9 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
 - Step 2 — content assembly: Structured Output schemas (Pydantic) for the
   content package (carousel slides referencing `listing_photo_id`, caption
   set, Reel script); prompt injects listing data + photo captions from
-  step 1 + the agent's `voice_profiles.sample_text` + resort-market
-  lifestyle framing; call via the `cerebras` skill pattern
+  step 1 + the agent's voice profile + resort-market lifestyle framing; call
+  via the `cerebras` skill pattern. (Planned as `voice_profiles.sample_text`;
+  changed during implementation to the distilled `style_notes` — see below)
 - Generation endpoint runs both steps and writes a new `content_packages`
   row (status `draft`) plus its slides/captions
 - Minimal UI to trigger generation and display the raw package
@@ -137,6 +155,13 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   regenerating replaces the previous draft; captioning runs concurrently and
   is capped at the first 8 photos; a listing with no photos is rejected with
   400; an LLM failure returns 502 and leaves the existing package untouched
+- Changed during implementation, and not written down until the Phase 9 pass:
+  the assembly prompt receives `voice_profiles.style_notes` — descriptors
+  distilled from the samples once, on upload — and never
+  `voice_profiles.sample_text`. Feeding it the raw samples carried facts about
+  the agent's other properties into new listings. `sample_text` is kept only so
+  the agent can see what they uploaded. See `docs/VOICE-CONTAMINATION.md`, and
+  the unit and integration tests that now pin this down
 - Validate: real listing + photos in -> per-photo captions generated ->
   structured, on-brand package out referencing the right photos, displayed
   in the UI
@@ -236,10 +261,23 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
 - Validate: test suite green via `uv run pytest` — 73 passed, 100% coverage of
   `backend/app`, plus 7 Playwright specs. See `docs/TESTING.md`
 
-## Phase 9 — Wrap-up [ ]
+## Phase 9 — Wrap-up [x]
 - Update `README.md` (concise, per CLAUDE.md)
 - Final pass through `docs/PLAN.md` to mark completed phases
 - Open PR per the standard dev process in CLAUDE.md
+- Decisions made during implementation:
+  - `README.md` was five stale lines claiming the project was in progress
+    against a date that had passed. Rewritten around what a reader needs
+    first: run it, know that data is ephemeral, find the tests
+  - The two stale sections of this document ("Current repo state" said
+    Greenfield; the timeline note was anchored to 2026-07-23) were updated
+    rather than annotated, so nobody meets a false statement on line 12. The
+    phase bodies were left exactly as written during each phase
+  - The AI chat is named in the README as not shipped rather than omitted or
+    presented as a roadmap item — `CLAUDE.md` describes it as part of the
+    product, so silence would have misled
+  - No screenshot: it would be a binary that drifts out of date, and CLAUDE.md
+    asks for a concise README
 
 ---
 
@@ -284,7 +322,13 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
     this decision before any real users are expected to keep data across
     sessions.
 
-No open questions remain. Ready to begin Phase 0 on your go-ahead.
+None of the thirteen decisions above were reversed during implementation.
+Decision 10 was refined rather than changed: `.txt` uploads still populate
+`sample_text`, but what the generator reads is the `style_notes` distilled from
+it, for the reason recorded under Phase 4.
+
+Decision 13 (data loss on restart) is the one to revisit first if this ever
+carries real users — see "Known limits" at the top.
 
 ---
 

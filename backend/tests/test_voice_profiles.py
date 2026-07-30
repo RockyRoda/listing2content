@@ -139,5 +139,23 @@ def test_put_rejects_non_txt(client, auth_headers):
     assert resp.status_code == 415
 
 
+def test_put_rejects_samples_over_the_size_cap(client, auth_headers):
+    """Total across all files is capped, not each file individually."""
+    from app import voice_profiles
+
+    half = b"x" * (voice_profiles.MAX_VOICE_BYTES // 2 + 10)
+    resp = client.put(
+        "/api/voice-profile",
+        files=[
+            ("files", ("a.txt", half, "text/plain")),
+            ("files", ("b.txt", half, "text/plain")),
+        ],
+        headers=auth_headers,
+    )
+    assert resp.status_code == 413
+    # The rejected upload left the profile untouched.
+    assert client.get("/api/voice-profile", headers=auth_headers).json()["sample_text"] == ""
+
+
 def test_voice_profile_requires_auth(client):
     assert client.get("/api/voice-profile").status_code == 401

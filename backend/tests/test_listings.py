@@ -133,3 +133,8 @@ def test_delete_photo(client, auth_headers):
     assert resp.status_code == 200
     assert resp.json()["photos"] == []
     assert client.get("/api" + url, headers=auth_headers).status_code == 404
+
+
+def test_delete_unknown_photo_is_404(client, auth_headers):
+    lid = client.post("/api/listings", json={"title": "x"}, headers=auth_headers).json()["id"]
+    assert client.delete(f"/api/listings/{lid}/photos/9999", headers=auth_headers).status_code == 404

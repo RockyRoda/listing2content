@@ -5,7 +5,10 @@
 param([string]$PhotoDir = "C:\Windows\Web\Wallpaper\ThemeA")
 
 $ErrorActionPreference = "SilentlyContinue"
-$base = "http://localhost:8000"
+# Requests use the IPv4 loopback, not "localhost": Windows resolves localhost
+# to ::1 first and Docker Desktop's [::]:8000 publish does not forward, so an
+# IPv6-first request stalls until it times out.
+$base = "http://127.0.0.1:8000"
 $pass = 0; $fail = 0
 
 function Check($name, $cond) {
@@ -237,7 +240,7 @@ function Start-Backend($port, $dbPath, $badKey) {
   if ($null -eq $savedMedia) { Remove-Item Env:\L2C_MEDIA_DIR -ErrorAction SilentlyContinue }      else { $env:L2C_MEDIA_DIR = $savedMedia }
   if ($null -eq $savedKey)   { Remove-Item Env:\OPENROUTER_API_KEY -ErrorAction SilentlyContinue } else { $env:OPENROUTER_API_KEY = $savedKey }
   for ($i = 0; $i -lt 40; $i++) {
-    try { if ((Invoke-RestMethod "http://localhost:$port/health").status -eq "ok") { return $true } } catch {}
+    try { if ((Invoke-RestMethod "http://127.0.0.1:$port/health").status -eq "ok") { return $true } } catch {}
     Start-Sleep -Milliseconds 500
   }
   return $false
@@ -263,7 +266,7 @@ if (-not $haveUv) {
   Stop-Backend $errPort
   $errDb = Join-Path $env:TEMP "l2c-badkey-$(Get-Random).db"
   if (Start-Backend $errPort $errDb "sk-or-v1-definitely-invalid") {
-    $errUrl = "http://localhost:$errPort"
+    $errUrl = "http://127.0.0.1:$errPort"
     $seed = Seed-Instance $errUrl
     $errCode = 0
     try {
@@ -282,7 +285,7 @@ if (-not $haveUv) {
   Stop-Backend $wipePort
   $wipeDb = Join-Path $env:TEMP "l2c-wipe-$(Get-Random).db"
   if (Start-Backend $wipePort $wipeDb $null) {
-    $wipeUrl = "http://localhost:$wipePort"
+    $wipeUrl = "http://127.0.0.1:$wipePort"
     $seed = Seed-Instance $wipeUrl
     $seedH = @{ Authorization = "Bearer $($seed.token)" }
     Write-Host "  ....  generating on the scratch instance before restarting" -ForegroundColor DarkGray

@@ -1,7 +1,10 @@
 # Phase 2 smoke test: static serving + auth API on http://localhost:8000
 # Assumes the app is already running (Docker or uvicorn). Run: .\verify-phase2.ps1
 $ErrorActionPreference = "SilentlyContinue"
-$base = "http://localhost:8000"
+# Requests use the IPv4 loopback, not "localhost": Windows resolves localhost
+# to ::1 first and Docker Desktop's [::]:8000 publish does not forward, so an
+# IPv6-first request stalls until it times out.
+$base = "http://127.0.0.1:8000"
 $pass = 0; $fail = 0
 
 function Check($name, $cond) {

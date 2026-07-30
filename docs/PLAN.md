@@ -205,11 +205,36 @@ auth -> listing -> generate -> review/edit -> Docker -> test flow (Phases
   drives the real scripts end to end (27 checks, one real generation); the
   Unix path was exercised via Git Bash
 
-## Phase 8 — Testing & hardening [ ]
+## Phase 8 — Testing & hardening [x]
 - Unit tests: auth, listing CRUD, structured-output parsing
 - Integration tests: signup -> listing -> generate -> edit -> save flow
 - Fix issues found; keep changes incremental per CLAUDE.md guidance
-- Validate: test suite green via `uv run pytest`
+- Decisions made during implementation:
+  - `app/generation.py` had no direct tests at all — every other test
+    monkeypatched it away — so `tests/test_generation.py` stubs one level
+    lower, at litellm's `completion`. The real prompt building and the real
+    structured-output parsing now run in tests. Same seam for the integration
+    test
+  - The contamination invariant from `docs/VOICE-CONTAMINATION.md` (raw writing
+    samples must never reach the assembly prompt) is now a unit test, not only
+    something the paid smoke test catches
+  - Browser tests added after all (`frontend/e2e/package-review.spec.ts`,
+    Playwright): the editor's dirty tracking, button states, PUT payload, and
+    photo-refetch behaviour were reachable no other way. Every `/api/**` call is
+    mocked in the browser, so the specs need no key, LLM, or database; the
+    backend serves the export on a spare port
+  - `pytest-cov` added as a dev dependency; `app/` is at 100% statement coverage
+  - The Phase 2/4/5 smoke tests now probe `127.0.0.1` like the start scripts,
+    removing the IPv6 stall they were exposed to
+- Fixes made: `generate_package` with an empty photo list raised
+  `ValueError: max_workers must be greater than 0` before reaching
+  `assemble_package`'s "No photos were provided" branch — the two functions
+  disagreed about whether zero photos was legal. Unreachable through the API,
+  which rejects it with 400 first, but reachable via `probe_voice.py`. Also
+  corrected a wrong row in `docs/TEST-PHASE5.md`, which had the initial
+  Save/Approve button states backwards
+- Validate: test suite green via `uv run pytest` — 73 passed, 100% coverage of
+  `backend/app`, plus 7 Playwright specs. See `docs/TESTING.md`
 
 ## Phase 9 — Wrap-up [ ]
 - Update `README.md` (concise, per CLAUDE.md)

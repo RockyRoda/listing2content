@@ -253,9 +253,13 @@ def generate_package(
     """Caption the photos concurrently, then assemble the package from them.
 
     Photos are captioned in parallel but returned in input order, so the nth
-    draft slide belongs to the nth photo.
+    draft slide belongs to the nth photo. An empty list skips captioning
+    entirely and leaves assemble_package to note that no photos were given -
+    a pool sized on an empty list would raise instead.
     """
     capped = photos[:MAX_CAPTIONED_PHOTOS]
-    with ThreadPoolExecutor(max_workers=len(capped)) as pool:
-        descriptions = list(pool.map(lambda photo: describe_photo(*photo), capped))
+    descriptions: list[str] = []
+    if capped:
+        with ThreadPoolExecutor(max_workers=len(capped)) as pool:
+            descriptions = list(pool.map(lambda photo: describe_photo(*photo), capped))
     return assemble_package(listing, descriptions, style_notes, tone_notes)

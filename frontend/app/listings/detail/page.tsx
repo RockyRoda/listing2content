@@ -7,6 +7,7 @@ import { api } from "@/lib/auth";
 import { useRequireAuth } from "@/lib/useRequireAuth";
 import { toPayload, valuesFrom, type ListingValues } from "@/lib/listingFields";
 import AppHeader from "@/components/AppHeader";
+import ChatPanel, { type Applied } from "@/components/ChatPanel";
 import ListingFields from "@/components/ListingFields";
 import PhotoManager, { type Photo } from "@/components/PhotoManager";
 
@@ -94,6 +95,19 @@ function DetailBody() {
         </form>
 
         <PhotoManager listingId={listing.id} photos={listing.photos} onChanged={load} />
+
+        <ChatPanel
+          listingId={id as string}
+          placeholder="Four beds, 4.5 baths, asking $8.95M"
+          // Reloading rebuilds the form from the server, so a field the
+          // assistant just filled in shows up without a manual refresh.
+          onApplied={(applied: Applied) => {
+            if (applied.listing) {
+              load();
+              setStatus("The assistant updated this listing - form refreshed.");
+            }
+          }}
+        />
       </main>
     </>
   );

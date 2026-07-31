@@ -8,14 +8,14 @@ lifestyle framing, ready for a quick approve/edit pass. An AI chat lets the
 agent both feed in listing data conversationally and edit/save the generated
 package.
 
-## Current state — v1 complete (2026-07-30)
-Phases 0–5 and 7–9 are done. Phase 6 (AI chat) was deferred, as decision 4
-scoped it to be.
+## Current state — all phases complete (2026-07-31)
+Phases 0–9 are done. Phase 6 (AI chat) was deferred out of v1 as decision 4
+scoped it to be, and built afterwards.
 
-- `backend/` — FastAPI on `uv`; 73 tests, 100% statement coverage of `app/`
-- `frontend/` — Next.js static export served by FastAPI; 7 Playwright specs
+- `backend/` — FastAPI on `uv`; 97 tests, 100% statement coverage of `app/`
+- `frontend/` — Next.js static export served by FastAPI; 14 Playwright specs
 - `scripts/` — start/stop for mac/linux/windows, `seed-demo.ps1`, and
-  `verify-phase2/4/5/7/8.ps1`
+  `verify-phase2/4/5/6/7/8.ps1`
 - `docs/` — this plan, `TESTING.md`, the per-phase test guides, and
   `VOICE-CONTAMINATION.md`
 - One Docker image builds and serves the whole app; `OPENROUTER_API_KEY`
@@ -69,7 +69,9 @@ and AI output is checked structurally rather than for quality. See
 Planned on 2026-07-23 against a 2026-07-28 target; v1 landed 2026-07-30, two
 days over. The phase order held up: the app was demoable end-to-end at Phase 4,
 and chat (Phase 6) was the only thing the schedule cost, which is what
-scoping it as a stretch goal was for.
+scoping it as a stretch goal was for. Chat was then built on 2026-07-31, on top
+of a finished product rather than alongside one — which is why it could reuse
+the Phase 5 edit path whole instead of growing a second way to write copy.
 
 The phase bodies below are left as written during implementation — each records
 the decisions taken and the problems found at the time, which is more useful
@@ -187,12 +189,60 @@ than a tidied summary.
   both local uvicorn and the container, and the manual browser pass in
   `docs/TEST-PHASE5.md` against the container (2026-07-29)
 
-## Phase 6 — AI chat (data entry + editing) [ ]
+## Phase 6 — AI chat (data entry + editing) [x]
 - Chat endpoint that can (a) parse conversational input into listing fields
   and (b) apply conversational edit instructions to an existing package
 - Chat UI wired to that endpoint, scoped to a listing
-- Validate: use chat to fill in a listing field and to request an edit to a
-  generated caption; confirm both persist
+- Decisions made during implementation:
+  - **One structured-output call per turn**, not a tool-calling loop.
+    `generation.chat_turn` returns a `ChatTurn` — reply, `listing_updates`,
+    `slide_edits`, `caption_edits`, `reel_script` — and `app/chat.py` writes
+    whatever came back. Neither of the two verbs needs the result of the other,
+    so a loop would have bought iteration caps and dispatch code for nothing,
+    and this reuses the existing litellm test seam unchanged
+  - **The transcript lives in `chat_messages`** (listing_id, role, content),
+    owner-scoped through the listing. History survives a reload and the server
+    replays what it wrote itself, rather than trusting a client-supplied
+    conversation. Capped at `MAX_CHAT_HISTORY` = 20 messages
+  - **Package edits reuse `content_packages.apply_edits`**, so chat inherits
+    the Phase 5 rules instead of restating them: a row id from another package
+    404s and writes nothing, and any copy edit returns an approved package to
+    draft. That rename (`_apply_edits` → `apply_edits`, plus `load_package` and
+    `require_package_id`) is the only Phase 5 code this phase touched
+  - **One shared `ChatPanel`** on the listing detail and package pages rather
+    than a page of its own, so the field or caption changes in front of the
+    agent. The turn reports `listing_changed` / `package_changed` and each host
+    reloads only what it owns — a turn that changes nothing must not refetch
+    the form over what the agent is typing
+  - `PackageEditor` owns its state from mount, so refetching the package was
+    not enough to show a chat rewrite: the page keys it on `pkg.id` plus a
+    `rewrites` counter so it remounts. `e2e/chat.spec.ts` pins this — reverting
+    the key leaves the old caption on screen while the server holds the new one
+  - Chat sees `style_notes` and never `sample_text`, for the Phase 4 reason —
+    it writes listing copy, so `docs/VOICE-CONTAMINATION.md` binds it too
+- Two prompt defects found by measuring, both fixed the way Phase 4's were
+  (place the constraint beside the material it governs, and say what not to do
+  rather than only what to do):
+  - **A turn following a copy rewrite re-sent that rewrite** alongside whatever
+    it had actually been asked — 4 of 5 runs — returning an approved package to
+    draft for no reason. `EDIT_REMINDER`, sitting next to the package copy
+    rather than in the system prompt, took it to 0 of 8. Explicit rewrites still
+    land, measured separately at 6 of 6, so the reminder does not over-suppress
+  - **Asked to edit copy before a package existed**, it drafted some and
+    reported it done in 2 of 6 runs. Nothing was written — `package_changed` was
+    correctly false — but the agent was told otherwise. The no-package text now
+    forbids drafting or describing copy outright: 0 of 8 in the probe, but one
+    still slipped through a later smoke run, so treat this as reduced rather
+    than fixed. No check asserts reply wording, so it fails nothing; the cost is
+    an agent briefly misled about work that was not done
+- Validate: `scripts/verify-phase6.ps1` (29 checks, real LLM calls) drives both
+  jobs end to end — chat fills four listing fields, answers a question without
+  writing anything, resolves a follow-up against the transcript, then rewrites a
+  named caption while leaving the script, slides, labels, and photo bindings
+  alone. Offline: `tests/test_chat.py` (24 tests) and `e2e/chat.spec.ts`
+  (7 specs). One check, "a copy rewrite returns it to draft", missed once in
+  three smoke runs — the model occasionally answers a rewrite request without
+  emitting the edit. Re-run it; the offline suites are deterministic
 
 ## Phase 7 — Docker packaging & scripts [x]
 - Finalize single-container Docker build (backend serving built frontend,
@@ -290,7 +340,10 @@ than a tidied summary.
    volume for v1.
 4. **Chat scope** — stretch goal. Phases 0–5, 7–8 (auth, listings,
    generation, manual review/edit, Docker, tests) are the v1 target; Phase 6
-   (AI chat for data entry/editing) ships only if time allows.
+   (AI chat for data entry/editing) ships only if time allows. _It did not make
+   v1, and was built on 2026-07-31 to the scope written above — listing fields
+   and edits to an existing package. Generating a package is still the explicit
+   button, not something a sentence can trigger._
 
 ## Decisions (round 2, resolved)
 5. **"Agent's voice"** — a reusable profile per agent (`voice_profiles`,

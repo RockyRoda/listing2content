@@ -106,6 +106,45 @@ STYLE_PROMPT = (
 MAX_STYLE_SAMPLE_CHARS = 6000
 
 
+CHAT_PROMPT = (
+    "You are the assistant inside a content tool for luxury and resort-market"
+    " real estate agents. The agent is working on one listing, and you do two"
+    " things for them: record listing details they mention, and rewrite copy in"
+    " their generated content package when they ask for a change."
+    "\n\nlisting_updates: set only the fields the agent actually gave you a"
+    " value for in this message, and leave every other field null. Never infer,"
+    " round, or invent a value, and never repeat a value that is already"
+    " recorded. If they were vague ('it's a big lot'), leave the field null and"
+    " ask them for the value in your reply."
+    "\n\nslide_edits and caption_edits: address rows by the slide_id and"
+    " caption_id given below, and include only the rows you are changing. Send"
+    " the complete new text for a row, not a fragment or a description of the"
+    " change. reel_script is the whole replacement script, or null to leave it"
+    " alone. Rewritten copy keeps the agent's voice and stays accurate to the"
+    " listing data -- change what they asked you to change and nothing else."
+    "\n\nreply: one or two sentences, to the agent, saying what you recorded or"
+    " rewrote, or asking for what you need. Never claim a change you did not put"
+    " in the fields above."
+)
+
+# Sits next to the package copy rather than in CHAT_PROMPT, on the same lesson
+# as SOURCE_REMINDER: a constraint about a block of material works where it sits
+# beside it. Without this, a turn whose predecessor rewrote a caption re-sent
+# that rewrite alongside whatever it had actually been asked - 4 of 5 measured
+# runs - which returned an approved package to draft for no reason.
+EDIT_REMINDER = (
+    "That is the copy as it stands right now, and it already includes every"
+    " edit you have made in this conversation. Those are saved. Do not send"
+    " them again: leave slide_edits and caption_edits empty and reel_script"
+    " null unless the agent's latest message asks for a further change to the"
+    " copy itself."
+)
+
+# Enough turns for the agent to say "make that shorter" and be understood,
+# without growing the prompt without limit over a long session.
+MAX_CHAT_HISTORY = 20
+
+
 class StyleProfile(BaseModel):
     """An agent's writing style, described without any of its subject matter."""
 
@@ -133,6 +172,51 @@ class PackageDraft(BaseModel):
     carousel_slides: list[SlideDraft]
     captions: list[CaptionDraft]
     reel_script: str
+
+
+class ListingPatch(BaseModel):
+    """Listing fields the agent named in chat; null means "leave this alone".
+
+    Mirrors listings.ListingUpdate. Kept here rather than imported so this
+    module stays free of the HTTP layer - it is the one part of the app that
+    needs no router, database, or request to test.
+    """
+
+    title: str | None
+    location: str | None
+    price: int | None
+    beds: int | None
+    baths: float | None
+    interior_sqft: int | None
+    lot_size: str | None
+    property_type: str | None
+    mls_number: str | None
+    features: str | None
+    description: str | None
+
+
+class SlideEditDraft(BaseModel):
+    """A rewrite of one carousel slide, addressed by its row id."""
+
+    slide_id: int
+    caption: str
+
+
+class CaptionEditDraft(BaseModel):
+    """A rewrite of one post caption, addressed by its row id."""
+
+    caption_id: int
+    text: str
+
+
+class ChatTurn(BaseModel):
+    """One assistant turn: what to say, and what to change while saying it."""
+
+    reply: str
+    listing_updates: ListingPatch
+    slide_edits: list[SlideEditDraft]
+    caption_edits: list[CaptionEditDraft]
+    reel_script: str | None
 
 
 def describe_photo(path: Path, content_type: str) -> str:
@@ -263,3 +347,68 @@ def generate_package(
         with ThreadPoolExecutor(max_workers=len(capped)) as pool:
             descriptions = list(pool.map(lambda photo: describe_photo(*photo), capped))
     return assemble_package(listing, descriptions, style_notes, tone_notes)
+
+
+def _listing_state(listing: dict) -> str:
+    """Render every listing field, naming the unset ones.
+
+    Unlike _listing_brief, which drops empty fields so the writer never sees a
+    blank, chat needs to know what is missing so it can ask for it.
+    """
+    return "\n".join(
+        f"{label}: {listing[field] if listing.get(field) not in (None, '') else '(not set)'}"
+        for field, label in BRIEF_FIELDS.items()
+    )
+
+
+def _package_state(package: dict | None) -> str:
+    """Render the package's copy with the row ids chat must address it by."""
+    if package is None:
+        return (
+            "No content package has been generated for this listing yet. There"
+            " is no copy to edit and no way to save any: slide_edits,"
+            " caption_edits, and reel_script cannot be used until one exists."
+            " If the agent asks for a copy change, do not draft, quote, or"
+            " describe one, and do not report it as done -- say the package has"
+            " to be generated first."
+        )
+    lines = ["Reel script:", package["reel_script"], "", "Carousel slides:"]
+    lines += [f"- slide_id {s['id']}: {s['caption']}" for s in package["slides"]]
+    lines += ["", "Post captions:"]
+    lines += [f"- caption_id {c['id']} ({c['label']}): {c['text']}" for c in package["captions"]]
+    return "\n".join(lines)
+
+
+def chat_turn(
+    listing: dict,
+    package: dict | None,
+    history: list[dict],
+    message: str,
+    style_notes: str,
+    tone_notes: str,
+) -> ChatTurn:
+    """Answer the agent's message, and say what to record or rewrite with it.
+
+    History carries only what was said. The listing and package state goes in
+    the current message instead, so the model reads today's rows rather than
+    the copy of them that some earlier turn quoted.
+    """
+    context = (
+        f"CURRENT LISTING\n{_listing_state(listing)}"
+        f"\n\nCURRENT CONTENT PACKAGE\n{_package_state(package)}"
+        f"\n\n{EDIT_REMINDER}"
+        f"\n\nAGENT VOICE\n{_voice_brief(style_notes, tone_notes)}"
+        f"\n\nTHE AGENT SAYS\n{message}"
+    )
+    response = completion(
+        model=ASSEMBLY_MODEL,
+        messages=[
+            {"role": "system", "content": CHAT_PROMPT},
+            *history[-MAX_CHAT_HISTORY:],
+            {"role": "user", "content": context},
+        ],
+        response_format=ChatTurn,
+        reasoning_effort="low",
+        extra_body=CEREBRAS_BODY,
+    )
+    return ChatTurn.model_validate_json(response.choices[0].message.content)

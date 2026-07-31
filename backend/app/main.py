@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db, storage
 from .auth import router as auth_router
+from .chat import router as chat_router
 from .content_packages import router as packages_router
 from .listings import router as listings_router
 from .voice_profiles import router as voice_router
@@ -41,6 +42,7 @@ app = FastAPI(title="Listing2Content", lifespan=lifespan)
 app.include_router(auth_router, prefix="/api")
 app.include_router(listings_router, prefix="/api")
 app.include_router(packages_router, prefix="/api")
+app.include_router(chat_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
 
 

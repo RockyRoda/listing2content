@@ -12,6 +12,7 @@ from pathlib import Path
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "listing2content.db"
 
 SCHEMA = """
+DROP TABLE IF EXISTS chat_messages;
 DROP TABLE IF EXISTS captions;
 DROP TABLE IF EXISTS carousel_slides;
 DROP TABLE IF EXISTS content_packages;
@@ -89,6 +90,14 @@ CREATE TABLE captions (
     content_package_id INTEGER NOT NULL REFERENCES content_packages(id),
     label TEXT NOT NULL,
     text TEXT NOT NULL
+);
+
+CREATE TABLE chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    listing_id INTEGER NOT NULL REFERENCES listings(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 

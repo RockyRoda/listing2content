@@ -6,6 +6,7 @@ import Link from "next/link";
 import { api } from "@/lib/auth";
 import { useRequireAuth } from "@/lib/useRequireAuth";
 import AppHeader from "@/components/AppHeader";
+import ChatPanel, { type Applied } from "@/components/ChatPanel";
 import PackageEditor, { type Package } from "@/components/PackageEditor";
 
 const GENERATE_ERRORS: Record<number, string> = {
@@ -23,6 +24,10 @@ function PackageBody() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  // Bumped when the assistant rewrites copy. The editor owns its state from
+  // mount, so a refetch alone would leave the old text on screen - it has to
+  // remount, and the package id has not changed.
+  const [rewrites, setRewrites] = useState(0);
 
   const load = useCallback(async () => {
     const listing = await api(`/listings/${id}`);
@@ -96,8 +101,23 @@ function PackageBody() {
         ) : (
           // Keyed on the package: regenerating replaces the draft, so the
           // editor remounts rather than carrying edits over to new copy.
-          <PackageEditor key={pkg.id} listingId={id as string} initial={pkg} />
+          <PackageEditor
+            key={`${pkg.id}-${rewrites}`}
+            listingId={id as string}
+            initial={pkg}
+          />
         )}
+
+        <ChatPanel
+          listingId={id as string}
+          placeholder="Make the second caption shorter"
+          onApplied={async (applied: Applied) => {
+            if (!applied.package) return;
+            await load();
+            setRewrites((n) => n + 1);
+            setStatus("The assistant rewrote copy below.");
+          }}
+        />
       </main>
     </>
   );

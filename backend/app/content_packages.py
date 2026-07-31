@@ -64,7 +64,7 @@ class PackageEdit(BaseModel):
     captions: list[CaptionEdit] = []
 
 
-def _load_package(conn, listing_id: int) -> Package | None:
+def load_package(conn, listing_id: int) -> Package | None:
     """Build a listing's package with its slides and captions, or None."""
     row = conn.execute(
         "SELECT * FROM content_packages WHERE listing_id = ?", (listing_id,)
@@ -101,7 +101,7 @@ def _load_package(conn, listing_id: int) -> Package | None:
     )
 
 
-def _package_id(conn, listing_id: int) -> int:
+def require_package_id(conn, listing_id: int) -> int:
     """Return the listing's package id, or 404 if none has been generated."""
     row = conn.execute(
         "SELECT id FROM content_packages WHERE listing_id = ?", (listing_id,)
@@ -111,7 +111,7 @@ def _package_id(conn, listing_id: int) -> int:
     return row["id"]
 
 
-def _apply_edits(conn, package_id: int, edit: PackageEdit) -> None:
+def apply_edits(conn, package_id: int, edit: PackageEdit) -> None:
     """Write the edited copy over the package's rows and return it to draft.
 
     Every UPDATE is scoped to the package, so a slide or caption id belonging
@@ -226,7 +226,7 @@ def create_package(
     with closing(db.connect()) as conn:
         _replace_package(conn, listing_id, draft, [p["id"] for p in photos])
         conn.commit()
-        return _load_package(conn, listing_id)
+        return load_package(conn, listing_id)
 
 
 @router.get("/{listing_id}/package", response_model=Package)
@@ -236,7 +236,7 @@ def get_package(
     """Return the listing's current package, or 404 if none has been generated."""
     with closing(db.connect()) as conn:
         owned_listing(conn, listing_id, user_id)
-        package = _load_package(conn, listing_id)
+        package = load_package(conn, listing_id)
     if package is None:
         raise HTTPException(status_code=404, detail="No content package yet")
     return package
@@ -251,9 +251,9 @@ def update_package(
     """Save the agent's edits to the slides, captions, and Reel script."""
     with closing(db.connect()) as conn:
         owned_listing(conn, listing_id, user_id)
-        _apply_edits(conn, _package_id(conn, listing_id), body)
+        apply_edits(conn, require_package_id(conn, listing_id), body)
         conn.commit()
-        return _load_package(conn, listing_id)
+        return load_package(conn, listing_id)
 
 
 @router.post("/{listing_id}/package/approve", response_model=Package)
@@ -265,7 +265,7 @@ def approve_package(
         owned_listing(conn, listing_id, user_id)
         conn.execute(
             "UPDATE content_packages SET status = 'approved' WHERE id = ?",
-            (_package_id(conn, listing_id),),
+            (require_package_id(conn, listing_id),),
         )
         conn.commit()
-        return _load_package(conn, listing_id)
+        return load_package(conn, listing_id)

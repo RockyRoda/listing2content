@@ -75,7 +75,10 @@ up unless noted.
 | `scripts/verify-phase6.ps1` | The chat: data entry, follow-ups, copy edits, scoping | 29 passed |
 | `scripts/verify-phase7.ps1` | Docker packaging; **drives the start/stop scripts itself** | 27 passed |
 
-Longer walkthroughs live in `docs/TEST-PHASE5.md` and `docs/TEST-PHASE7.md`.
+Longer walkthroughs live in `docs/TEST-PHASE5.md`, `docs/TEST-PHASE6.md`, and
+`docs/TEST-PHASE7.md`. `TEST-PHASE6.md` is the one to follow to verify the chat
+end to end by hand, including the mutations that prove its two riskiest tests
+can fail.
 
 `verify-phase6.ps1` is the one with a genuinely non-deterministic check. The
 model decides each turn, so its assertions are about what it was plainly asked

@@ -93,5 +93,6 @@ real LLM calls, and what is deliberately not covered.
 ## Docs
 
 `docs/PLAN.md` is the build plan and the record of what each phase decided.
-`docs/TESTING.md`, `docs/TEST-PHASE5.md`, `docs/TEST-PHASE7.md`, and
-`docs/TEST-PHASE8.md` are the test guides. MIT licensed.
+`docs/TESTING.md`, `docs/TEST-PHASE5.md`, `docs/TEST-PHASE6.md`,
+`docs/TEST-PHASE7.md`, and `docs/TEST-PHASE8.md` are the test guides.
+MIT licensed.
